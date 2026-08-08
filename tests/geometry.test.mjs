@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   bikeCatalog,
   bikeGeometryByModel,
@@ -34,6 +35,11 @@ const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.d - 1),
   Math.abs(matrix.e),
   Math.abs(matrix.f),
+);
+
+const enduranceTemplateSource = readFileSync(
+  new URL("../src/components/bike/templates/EnduranceBikeTemplate.jsx", import.meta.url),
+  "utf8",
 );
 
 test("frame points respect stack and reach", () => {
@@ -225,6 +231,35 @@ test("Figma endurance frame uses the new semantic split nodes", () => {
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameChainstay.nodeId, "2:931");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameBottomBracket.nodeId, "2:902");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frame, undefined);
+});
+
+test("Endurance SVG render order is the reverse of the Figma root layer panel", () => {
+  const renderOrderTokens = [
+    'renderLayer="front-rotor"',
+    'renderLayer="rear-rotor"',
+    'renderLayer="cassette"',
+    'renderLayer="non-drive-crank"',
+    'renderLayer="rear-wheel"',
+    'renderLayer="front-wheel"',
+    'renderLayer="seatpost"',
+    'renderLayer="saddle"',
+    'data-render-layer="cockpit"',
+    'renderLayer="fork"',
+    'data-render-layer="frame"',
+    'renderLayer="chainring"',
+    'renderLayer="drive-crank"',
+    'renderLayer="chain"',
+    'renderLayer="derailleur"',
+    "{showFigmaAnchors && (",
+  ];
+  let previousIndex = -1;
+  for (const token of renderOrderTokens) {
+    const index = enduranceTemplateSource.indexOf(token);
+    assert.ok(index > previousIndex, `${token} must render after the preceding Figma layer`);
+    previousIndex = index;
+  }
+  assert.match(enduranceTemplateSource, /SVG render order is intentionally reversed from Figma layer panel\./);
+  assert.match(enduranceTemplateSource, /Do not reorder without checking the Figma EnduranceBike source\./);
 });
 
 test("Figma component connection anchors remain exact for all seven Domane sizes", () => {

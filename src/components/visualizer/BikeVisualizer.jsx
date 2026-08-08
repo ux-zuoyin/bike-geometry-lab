@@ -118,7 +118,7 @@ export function BikeVisualizer({ bike, fit }) {
           <div className="visual-debug-tools" aria-label="Endurance visual calibration tools">
             <span>DEVELOPMENT · VISUAL CALIBRATION</span>
             <Switch label="Show Geometry Skeleton" checked={showSkeleton} onChange={setShowSkeleton} />
-            <Switch label="Show Figma Anchors" checked={showFigmaAnchors} onChange={setShowFigmaAnchors} />
+            <Switch label="Show Geometry Anchors" checked={showFigmaAnchors} onChange={setShowFigmaAnchors} />
           </div>
         )}
       </div>

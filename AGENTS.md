@@ -13,6 +13,8 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Current product scope contains one model only: Trek Domane in the Endurance category. Do not expose All-Round, Aero, other brands, placeholder bikes, a second bike, recommendations, OCR, AI, rider skeletons, or cloud sync in the active UI until the user expands scope again.
 - Trek Domane supports sizes 44, 49, 52, 54, 56, 58, and 61. Store product geometry with explicit `Mm` / `Deg` field names; source chart lengths were in cm and are normalized to mm at the data boundary.
 - The Figma Endurance template is calibrated to Trek Domane size 56. Size 56 is the zero-deformation visual baseline; every other size is a geometry delta from 56, never an overall frame scale.
+- The Endurance SVG root render order must stay reversed from the Figma layer panel: front rotor, rear rotor, cassette, non-drive crank, rear wheel, front wheel, seatpost, saddle, cockpit, fork, frame, chainring, drive crank, chain, derailleur, then optional debug anchors. Control this with SVG DOM order, not CSS `z-index`.
+- Geometry/debug anchors are hidden by default and, when enabled, must render as the final SVG child so no bike part can cover them. Keep rotors independent from wheel groups so the Figma drivetrain/wheel stacking remains representable.
 - Desktop-only UI is intentional; do not spend scope on mobile adaptation.
 
 - Render a complete, standardized side-view road bike between technical diagram and flat product illustration; do not fall back to centerline-only frame tubes.

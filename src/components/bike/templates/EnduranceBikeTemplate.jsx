@@ -57,7 +57,7 @@ const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.f),
 );
 
-function TemplateAsset({ asset, layer, transform, className }) {
+function TemplateAsset({ asset, layer, transform, className, renderLayer }) {
   return (
     <image
       href={asset}
@@ -69,31 +69,33 @@ function TemplateAsset({ asset, layer, transform, className }) {
       transform={transform ? matrixValue(transform) : undefined}
       className={className}
       data-figma-node-id={layer.nodeId}
+      data-render-layer={renderLayer}
     />
   );
 }
 
-function FixedWheel({ axle, rotorAsset, rotorLayer, wheelLayer, project }) {
+function FixedRotor({ axle, asset, layer, project, renderLayer }) {
+  const center = project(axle);
+  const rotorTransform = uniformAroundPoint(
+    { x: layer.x + layer.width / 2, y: layer.y + layer.height / 2 },
+    center,
+    wheelScale,
+  );
+
+  return <TemplateAsset asset={asset} layer={layer} transform={rotorTransform} className="figma-bike__rotor" renderLayer={renderLayer} />;
+}
+
+function FixedWheel({ axle, layer, project, renderLayer }) {
   const center = project(axle);
   const wheelBox = {
-    ...wheelLayer,
+    ...layer,
     x: center.x - wheelDiameter / 2,
     y: center.y - wheelDiameter / 2,
     width: wheelDiameter,
     height: wheelDiameter,
   };
-  const rotorTransform = uniformAroundPoint(
-    { x: rotorLayer.x + rotorLayer.width / 2, y: rotorLayer.y + rotorLayer.height / 2 },
-    center,
-    wheelScale,
-  );
 
-  return (
-    <g className="figma-bike__wheel">
-      <TemplateAsset asset={rotorAsset} layer={rotorLayer} transform={rotorTransform} className="figma-bike__rotor" />
-      <TemplateAsset asset={wheel} layer={wheelBox} className="figma-bike__wheel-asset" />
-    </g>
-  );
+  return <TemplateAsset asset={wheel} layer={wheelBox} className="figma-bike__wheel-asset" renderLayer={renderLayer} />;
 }
 
 function FigmaAnchorDebug({ matrices, parentAnchors, seatpostAnchors, headTubeDebug }) {
@@ -170,7 +172,7 @@ function FigmaAnchorDebug({ matrices, parentAnchors, seatpostAnchors, headTubeDe
     },
   ];
   return (
-    <g className="figma-anchor-debug" aria-label="Figma component connection anchors">
+    <g className="figma-anchor-debug" aria-label="Figma component connection anchors" data-render-layer="anchors">
       <g
         className="head-tube-debug"
         data-base-visual-size={ENDURANCE_VISUAL_BASE_SIZE}
@@ -416,29 +418,34 @@ export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false 
       data-top-tube-delta-identity-error={identityMatrixError(topTubeDeltaMatrix).toFixed(9)}
       data-down-tube-delta-identity-error={identityMatrixError(downTubeDeltaMatrix).toFixed(9)}
     >
-      <FixedWheel axle={data.frame.rearAxle} rotorAsset={rearRotor} rotorLayer={layers.rearRotor} wheelLayer={layers.rearWheel} project={project} />
-      <FixedWheel axle={data.frame.frontAxle} rotorAsset={frontRotor} rotorLayer={layers.frontRotor} wheelLayer={layers.frontWheel} project={project} />
-
-      <TemplateAsset asset={fork} layer={layers.fork} transform={forkMatrix} className="figma-bike__fork" />
-      <TemplateAsset asset={seatpost} layer={layers.seatpost} transform={seatpostMatrix} className="figma-bike__component figma-bike__seatpost" />
-
-      <TemplateAsset asset={frameDownTube} layer={layers.frameDownTube} transform={downTubeMatrix} className="figma-bike__frame-part figma-bike__down-tube" />
-      <TemplateAsset asset={frameTopTube} layer={layers.frameTopTube} transform={topTubeMatrix} className="figma-bike__frame-part figma-bike__top-tube" />
-      <TemplateAsset asset={frameHeadTube} layer={layers.frameHeadTube} transform={headTubeMatrix} className="figma-bike__frame-part figma-bike__head-tube" />
-      <TemplateAsset asset={frameChainstay} layer={layers.frameChainstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__chainstay" />
-      <TemplateAsset asset={frameSeatstay} layer={layers.frameSeatstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seatstay" />
-      <TemplateAsset asset={frameSeatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
-      <TemplateAsset asset={frameBottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
-      <TemplateAsset asset={stem} layer={layers.stem} transform={stemMatrix} className="figma-bike__component figma-bike__stem" />
-      <TemplateAsset asset={handlebar} layer={layers.handlebar} transform={handlebarMatrix} className="figma-bike__component figma-bike__handlebar" />
-      <TemplateAsset asset={saddle} layer={layers.saddle} transform={saddleMatrix} className="figma-bike__component figma-bike__saddle" />
-
-      <TemplateAsset asset={cassette} layer={layers.cassette} transform={rearMatrix} className="figma-bike__component figma-bike__cassette" />
-      <TemplateAsset asset={nonDriveCrank} layer={layers.nonDriveCrank} transform={nonDriveCrankMatrix} className="figma-bike__component" />
-      <TemplateAsset asset={chainring} layer={layers.chainring} transform={bbMatrix} className="figma-bike__component" />
-      <TemplateAsset asset={driveCrank} layer={layers.driveCrank} transform={driveCrankMatrix} className="figma-bike__component" />
-      <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" />
-      <TemplateAsset asset={derailleur} layer={layers.derailleur} transform={rearMatrix} className="figma-bike__component" />
+      {/* SVG render order is intentionally reversed from Figma layer panel.
+          Do not reorder without checking the Figma EnduranceBike source. */}
+      <FixedRotor axle={data.frame.frontAxle} asset={frontRotor} layer={layers.frontRotor} project={project} renderLayer="front-rotor" />
+      <FixedRotor axle={data.frame.rearAxle} asset={rearRotor} layer={layers.rearRotor} project={project} renderLayer="rear-rotor" />
+      <TemplateAsset asset={cassette} layer={layers.cassette} transform={rearMatrix} className="figma-bike__component figma-bike__cassette" renderLayer="cassette" />
+      <TemplateAsset asset={nonDriveCrank} layer={layers.nonDriveCrank} transform={nonDriveCrankMatrix} className="figma-bike__component figma-bike__non-drive-crank" renderLayer="non-drive-crank" />
+      <FixedWheel axle={data.frame.rearAxle} layer={layers.rearWheel} project={project} renderLayer="rear-wheel" />
+      <FixedWheel axle={data.frame.frontAxle} layer={layers.frontWheel} project={project} renderLayer="front-wheel" />
+      <TemplateAsset asset={seatpost} layer={layers.seatpost} transform={seatpostMatrix} className="figma-bike__component figma-bike__seatpost" renderLayer="seatpost" />
+      <TemplateAsset asset={saddle} layer={layers.saddle} transform={saddleMatrix} className="figma-bike__component figma-bike__saddle" renderLayer="saddle" />
+      <g className="figma-bike__cockpit" data-render-layer="cockpit">
+        <TemplateAsset asset={stem} layer={layers.stem} transform={stemMatrix} className="figma-bike__component figma-bike__stem" />
+        <TemplateAsset asset={handlebar} layer={layers.handlebar} transform={handlebarMatrix} className="figma-bike__component figma-bike__handlebar" />
+      </g>
+      <TemplateAsset asset={fork} layer={layers.fork} transform={forkMatrix} className="figma-bike__fork" renderLayer="fork" />
+      <g className="figma-bike__frame-stack" data-render-layer="frame">
+        <TemplateAsset asset={frameDownTube} layer={layers.frameDownTube} transform={downTubeMatrix} className="figma-bike__frame-part figma-bike__down-tube" />
+        <TemplateAsset asset={frameTopTube} layer={layers.frameTopTube} transform={topTubeMatrix} className="figma-bike__frame-part figma-bike__top-tube" />
+        <TemplateAsset asset={frameHeadTube} layer={layers.frameHeadTube} transform={headTubeMatrix} className="figma-bike__frame-part figma-bike__head-tube" />
+        <TemplateAsset asset={frameChainstay} layer={layers.frameChainstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__chainstay" />
+        <TemplateAsset asset={frameSeatstay} layer={layers.frameSeatstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seatstay" />
+        <TemplateAsset asset={frameSeatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
+        <TemplateAsset asset={frameBottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
+      </g>
+      <TemplateAsset asset={chainring} layer={layers.chainring} transform={bbMatrix} className="figma-bike__component figma-bike__chainring" renderLayer="chainring" />
+      <TemplateAsset asset={driveCrank} layer={layers.driveCrank} transform={driveCrankMatrix} className="figma-bike__component figma-bike__drive-crank" renderLayer="drive-crank" />
+      <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" renderLayer="chain" />
+      <TemplateAsset asset={derailleur} layer={layers.derailleur} transform={rearMatrix} className="figma-bike__component figma-bike__derailleur" renderLayer="derailleur" />
       {showFigmaAnchors && (
         <FigmaAnchorDebug
           matrices={matrices}
