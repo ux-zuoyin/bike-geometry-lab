@@ -7,7 +7,6 @@ import {
   defaultFit,
   geometrySizes,
   getTrekDomaneSize,
-  moduleItems,
   toBikeGeometry,
   trekDomane,
 } from "../src/data/bikes.js";
@@ -58,8 +57,12 @@ const bikeVisualizerSource = readFileSync(
   "utf8",
 );
 const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-const controlPanelSource = readFileSync(
-  new URL("../src/components/controls/ControlPanel.jsx", import.meta.url),
+const framePanelSource = readFileSync(
+  new URL("../src/components/panels/FrameGeometryPanel.jsx", import.meta.url),
+  "utf8",
+);
+const setupPanelSource = readFileSync(
+  new URL("../src/components/panels/BikeSetupPanel.jsx", import.meta.url),
   "utf8",
 );
 const wheelsetVisualsSource = readFileSync(
@@ -94,6 +97,26 @@ test("crank length changes pedal without moving bottom bracket", () => {
   assert.notDeepEqual(short.contacts.pedal, long.contacts.pedal);
 });
 
+test("Bike Setup changes contact points and visuals without mutating Frame Geometry", () => {
+  const geometry = enduranceGeometrySizes[54];
+  const baseline = buildBikeGeometry(geometry, defaultFit);
+  const configured = buildBikeGeometry(geometry, {
+    ...defaultFit,
+    wheelset: "deepProfile",
+    stemLength: 120,
+    stemAngle: -6,
+    spacer: 25,
+    saddleHeight: 780,
+    saddleSetback: 30,
+    crankLength: 165,
+  });
+  assert.deepEqual(configured.geometry, baseline.geometry);
+  assert.deepEqual(configured.frame, baseline.frame);
+  assert.notDeepEqual(configured.contacts.handlebar, baseline.contacts.handlebar);
+  assert.notDeepEqual(configured.contacts.saddle, baseline.contacts.saddle);
+  assert.notDeepEqual(configured.contacts.pedal, baseline.contacts.pedal);
+});
+
 test("the runtime exposes Endurance as its only visual archetype", () => {
   assert.deepEqual(Object.keys(bikeArchetypes), ["endurance"]);
   assert.equal(bikeArchetypes.endurance.label, "Endurance");
@@ -125,7 +148,7 @@ test("Bike Components exposes three paired 700C wheelsets with a shared explicit
   ]);
   assert.equal(getWheelset("unknown").id, DEFAULT_WHEELSET_ID);
   assert.deepEqual(wheelsets.map(({ figma }) => figma.groupNodeId), ["2:948", "2:979", "2:994"]);
-  assert.ok(moduleItems.some(({ id, label }) => id === "components" && label === "车身配件"));
+  assert.match(setupPanelSource, /<h2>车身配件<\/h2>/);
 });
 
 test("wheelset visuals replace only the paired Figma wheel assets and stay axle-driven", () => {
@@ -152,13 +175,43 @@ test("wheelset visuals replace only the paired Figma wheel assets and stay axle-
   assert.match(enduranceTemplateSource, /asset=\{rearRotor\}/);
 });
 
-test("wheelset Bike Setup state is independent from Domane size state", () => {
-  assert.match(appSource, /useState\(\{ wheelset: DEFAULT_WHEELSET_ID \}\)/);
-  assert.match(appSource, /useState\(trekDomane\.visualBaseSize\)/);
-  assert.match(appSource, /<BikeVisualizer bike=\{bike\} fit=\{fit\} wheelset=\{wheelset\} \/>/);
-  assert.match(controlPanelSource, /role="radiogroup" aria-label="轮组类型"/);
-  assert.match(controlPanelSource, /updateBikeSetup\("wheelset", wheelset\.id\)/);
-  assert.doesNotMatch(appSource, /setBikeSetup\([^\n]*selectedSize/);
+test("Frame State and Bike Setup are independent sources of truth", () => {
+  assert.match(appSource, /const \[frameState, setFrameState\] = useState\(\{/);
+  assert.match(appSource, /bikeId: trekDomane\.id,[\s\S]*size: trekDomane\.visualBaseSize/);
+  assert.match(appSource, /const \[bikeSetup, setBikeSetup\] = useState\(\{[\s\S]*\.\.\.defaultFit,[\s\S]*wheelset: DEFAULT_WHEELSET_ID/);
+  assert.match(appSource, /const sizeData = getTrekDomaneSize\(frameState\.size\)/);
+  assert.match(appSource, /const setFrameSize = \(size\) => setFrameState/);
+  assert.match(appSource, /const updateBikeSetup = \(key, value\) => setBikeSetup/);
+  assert.match(appSource, /<BikeVisualizer bike=\{bike\} fit=\{bikeSetup\} wheelset=\{wheelset\} \/>/);
+  assert.match(setupPanelSource, /role="radiogroup" aria-label="轮组类型"/);
+  assert.match(setupPanelSource, /updateBikeSetup\("wheelset", wheelset\.id\)/);
+  assert.doesNotMatch(appSource, /setBikeSetup\([^\n]*frameState/);
+  assert.doesNotMatch(appSource, /setFrameState\([^\n]*bikeSetup/);
+});
+
+test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without module navigation", () => {
+  const frameIndex = appSource.indexOf("<FrameGeometryPanel");
+  const visualizerIndex = appSource.indexOf("<BikeVisualizer");
+  const setupIndex = appSource.indexOf("<BikeSetupPanel");
+  assert.ok(frameIndex >= 0 && frameIndex < visualizerIndex && visualizerIndex < setupIndex);
+  assert.doesNotMatch(appSource, /IconRail|ControlPanel|active, setActive/);
+  for (const label of [
+    "Seat Tube",
+    "Seat Tube Angle",
+    "Head Tube Angle",
+    "Effective Top Tube",
+    "BB Drop",
+    "Chainstay",
+    "Fork Offset",
+    "Trail",
+    "Standover",
+  ]) {
+    assert.ok(framePanelSource.includes(label));
+  }
+  for (const title of ["轮组", "把组", "坐垫 / 座杆", "曲柄"]) {
+    assert.ok(setupPanelSource.includes(`title="${title}"`));
+  }
+  assert.match(appSource, /aria-label=\{isSetupPanelOpen \? "隐藏配件面板" : "显示配件面板"\}/);
 });
 
 test("all Trek Domane source rows preserve the supplied normalized geometry fields", () => {

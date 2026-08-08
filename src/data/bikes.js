@@ -26,12 +26,3 @@ export const defaultFit = {
     inseam: 83,
   },
 };
-
-export const moduleItems = [
-  { id: "frame", index: "01", label: "车架" },
-  { id: "cockpit", index: "02", label: "车把 / 把立" },
-  { id: "saddle", index: "03", label: "坐垫 / 座管" },
-  { id: "crank", index: "04", label: "曲柄" },
-  { id: "components", index: "05", label: "车身配件" },
-  { id: "data", index: "06", label: "几何数据" },
-];

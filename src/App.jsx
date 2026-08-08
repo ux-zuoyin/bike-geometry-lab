@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Info, Question, Stack } from "@phosphor-icons/react";
+import { Info, Question, SidebarSimple, Stack } from "@phosphor-icons/react";
 import {
   defaultFit,
   getTrekDomaneSize,
@@ -7,27 +7,32 @@ import {
   trekDomane,
 } from "./data/bikes.js";
 import { DEFAULT_WHEELSET_ID, getWheelset } from "./config/wheelsets.js";
-import { IconRail } from "./components/navigation/IconRail.jsx";
-import { ControlPanel } from "./components/controls/ControlPanel.jsx";
+import { FrameGeometryPanel } from "./components/panels/FrameGeometryPanel.jsx";
+import { BikeSetupPanel } from "./components/panels/BikeSetupPanel.jsx";
 import { BikeVisualizer } from "./components/visualizer/BikeVisualizer.jsx";
 
 export function App() {
-  const [active, setActive] = useState("frame");
-  const [selectedSize, setSelectedSize] = useState(trekDomane.visualBaseSize);
-  const [fit, setFit] = useState(defaultFit);
-  const [bikeSetup, setBikeSetup] = useState({ wheelset: DEFAULT_WHEELSET_ID });
+  const [frameState, setFrameState] = useState({
+    bikeId: trekDomane.id,
+    size: trekDomane.visualBaseSize,
+  });
+  const [bikeSetup, setBikeSetup] = useState({
+    ...defaultFit,
+    wheelset: DEFAULT_WHEELSET_ID,
+  });
+  const [isSetupPanelOpen, setIsSetupPanelOpen] = useState(true);
 
   const bike = useMemo(() => {
-    const sizeData = getTrekDomaneSize(selectedSize);
+    const sizeData = getTrekDomaneSize(frameState.size);
     return {
       ...trekDomane,
-      size: selectedSize,
+      size: frameState.size,
       sizeData,
       geometry: toBikeGeometry(sizeData),
     };
-  }, [selectedSize]);
+  }, [frameState.size]);
 
-  const updateFit = (key, value) => setFit((current) => ({ ...current, [key]: value }));
+  const setFrameSize = (size) => setFrameState((current) => ({ ...current, size }));
   const updateBikeSetup = (key, value) => setBikeSetup((current) => ({ ...current, [key]: value }));
   const wheelset = getWheelset(bikeSetup.wheelset);
 
@@ -44,26 +49,27 @@ export function App() {
           <small>Endurance</small>
         </div>
         <div className="topbar-actions">
+          <button
+            type="button"
+            className="setup-panel-control"
+            aria-label={isSetupPanelOpen ? "隐藏配件面板" : "显示配件面板"}
+            aria-expanded={isSetupPanelOpen}
+            onClick={() => setIsSetupPanelOpen((current) => !current)}
+          >
+            <SidebarSimple size={18} />
+            <span>{isSetupPanelOpen ? "隐藏配件" : "显示配件"}</span>
+          </button>
           <button type="button" aria-label="关于"><Info size={19} /></button>
           <button type="button" aria-label="帮助"><Question size={19} /></button>
         </div>
       </header>
 
-      <main className="workspace" id="top">
-        <IconRail active={active} onChange={setActive} />
-        <ControlPanel
-          active={active}
-          fit={fit}
-          updateFit={updateFit}
-          selectedSize={selectedSize}
-          setSelectedSize={setSelectedSize}
-          bike={bike}
-          bikeSetup={bikeSetup}
-          updateBikeSetup={updateBikeSetup}
-        />
+      <main className={`workspace${isSetupPanelOpen ? "" : " workspace--setup-collapsed"}`} id="top">
+        <FrameGeometryPanel bike={bike} frameState={frameState} setFrameSize={setFrameSize} />
         <div className="main-stage">
-          <BikeVisualizer bike={bike} fit={fit} wheelset={wheelset} />
+          <BikeVisualizer bike={bike} fit={bikeSetup} wheelset={wheelset} />
         </div>
+        {isSetupPanelOpen && <BikeSetupPanel bikeSetup={bikeSetup} updateBikeSetup={updateBikeSetup} />}
       </main>
     </div>
   );
