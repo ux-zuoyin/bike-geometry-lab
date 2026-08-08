@@ -3,6 +3,7 @@ import { Crosshair, MagnifyingGlassMinus, MagnifyingGlassPlus } from "@phosphor-
 import { buildBikeGeometry } from "../../lib/geometry/index.js";
 import { createProjector, WHEEL_RADIUS } from "../../lib/geometry/frameGeometry.js";
 import { bikeArchetypes } from "../../config/bikeArchetypes.js";
+import { PREVIEW_MOTION_CONFIG } from "../../lib/bikeVisual/previewMotion.js";
 import { Switch } from "../ui/Stepper.jsx";
 import { RoadBikeVisual } from "./bikeParts/RoadBikeVisual.jsx";
 import { GeometrySkeleton } from "./GeometrySkeleton.jsx";
@@ -10,10 +11,10 @@ import { AngleIndicator, ContactPoint, DimensionLine } from "./annotations.jsx";
 
 const IS_DEVELOPMENT = import.meta.env.DEV;
 
-function BikeLayer({ data, projector, showSkeleton, showFigmaAnchors }) {
+function BikeLayer({ data, motionEnabled, projector, showSkeleton, showFigmaAnchors }) {
   return (
     <g className="bike-layer bike-layer--primary">
-      <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} />
+      <RoadBikeVisual data={data} motionEnabled={motionEnabled} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} />
       {showSkeleton && <GeometrySkeleton anchors={data.anchors} project={projector} />}
       <ContactPoint point={data.contacts.saddle} project={projector} label="S" kind="saddle" />
       <ContactPoint point={data.contacts.handlebar} project={projector} label="H" kind="handlebar" />
@@ -27,6 +28,7 @@ export function BikeVisualizer({ bike, fit }) {
   const [zoom, setZoom] = useState(1);
   const [showSkeleton, setShowSkeleton] = useState(false);
   const [showFigmaAnchors, setShowFigmaAnchors] = useState(false);
+  const [previewMotion, setPreviewMotion] = useState(PREVIEW_MOTION_CONFIG.enabledByDefault);
   const data = useMemo(() => buildBikeGeometry(bike.geometry, fit), [bike.geometry, fit]);
   const project = createProjector();
   const wheelbaseY = bike.geometry.bbDrop - WHEEL_RADIUS - 44;
@@ -41,6 +43,7 @@ export function BikeVisualizer({ bike, fit }) {
         </div>
         <div className="canvas-tools">
           <span className="visual-base-chip">FIGMA BASE · SIZE {bike.visualBaseSize}</span>
+          <Switch label="Preview Motion" checked={previewMotion} onChange={setPreviewMotion} />
           <Switch label="显示尺寸" checked={showDimensions} onChange={setShowDimensions} />
         </div>
       </div>
@@ -56,6 +59,7 @@ export function BikeVisualizer({ bike, fit }) {
           <g className="zoom-group" style={{ transform: `translate(490px, 310px) scale(${zoom}) translate(-490px, -310px)` }}>
             <BikeLayer
               data={data}
+              motionEnabled={previewMotion}
               projector={project}
               showSkeleton={IS_DEVELOPMENT && showSkeleton}
               showFigmaAnchors={IS_DEVELOPMENT && showFigmaAnchors}

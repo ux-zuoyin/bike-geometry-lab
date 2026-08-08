@@ -27,6 +27,11 @@ import {
   resolveAssetAnchor,
 } from "../src/lib/bikeVisual/figmaEnduranceTemplate.js";
 import { getSeatpostVisualAnchors } from "../src/lib/bikeVisual/seatpostGeometry.js";
+import {
+  PREVIEW_MOTION_CONFIG,
+  getRotationAnimation,
+  oppositePointAround,
+} from "../src/lib/bikeVisual/previewMotion.js";
 
 const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.a - 1),
@@ -260,6 +265,27 @@ test("Endurance SVG render order is the reverse of the Figma root layer panel", 
   }
   assert.match(enduranceTemplateSource, /SVG render order is intentionally reversed from Figma layer panel\./);
   assert.match(enduranceTemplateSource, /Do not reorder without checking the Figma EnduranceBike source\./);
+});
+
+test("preview motion uses explicit geometry centers and a calm default cadence", () => {
+  assert.equal(PREVIEW_MOTION_CONFIG.enabledByDefault, false);
+  assert.equal(PREVIEW_MOTION_CONFIG.wheelDurationSeconds, 4.2);
+  assert.equal(PREVIEW_MOTION_CONFIG.crankDurationSeconds, 6.4);
+  assert.ok(PREVIEW_MOTION_CONFIG.wheelDurationSeconds < PREVIEW_MOTION_CONFIG.crankDurationSeconds);
+  assert.deepEqual(getRotationAnimation({ x: 430, y: 420 }), {
+    from: "0 430 420",
+    to: "360 430 420",
+  });
+});
+
+test("non-drive crank starts exactly opposite the drive crank and shares its rotation cycle", () => {
+  const bb = { x: 430, y: 420 };
+  const drivePedal = { x: 492, y: 471 };
+  const nonDrivePedal = oppositePointAround(bb, drivePedal);
+  assert.deepEqual(nonDrivePedal, { x: 368, y: 369 });
+  assert.equal(drivePedal.x - bb.x, -(nonDrivePedal.x - bb.x));
+  assert.equal(drivePedal.y - bb.y, -(nonDrivePedal.y - bb.y));
+  assert.match(enduranceTemplateSource, /phaseOffset=\{180\} renderLayer="non-drive-crank" syncGroup="crankset"/);
 });
 
 test("Figma component connection anchors remain exact for all seven Domane sizes", () => {
