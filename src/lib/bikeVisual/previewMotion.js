@@ -1,8 +1,8 @@
 export const PREVIEW_MOTION_CONFIG = Object.freeze({
-  cadenceRpm: 80,
-  wheelRpm: 100,
-  wheelDurationSeconds: 60 / 100,
-  crankDurationSeconds: 60 / 80,
+  cadenceRpm: 50,
+  wheelRpm: 62.5,
+  wheelDurationSeconds: 60 / 62.5,
+  crankDurationSeconds: 60 / 50,
 });
 
 export function getRotationAnimation(center) {
