@@ -6,6 +6,7 @@ import {
   toBikeGeometry,
   trekDomane,
 } from "./data/bikes.js";
+import { DEFAULT_WHEELSET_ID, getWheelset } from "./config/wheelsets.js";
 import { IconRail } from "./components/navigation/IconRail.jsx";
 import { ControlPanel } from "./components/controls/ControlPanel.jsx";
 import { BikeVisualizer } from "./components/visualizer/BikeVisualizer.jsx";
@@ -14,6 +15,7 @@ export function App() {
   const [active, setActive] = useState("frame");
   const [selectedSize, setSelectedSize] = useState(trekDomane.visualBaseSize);
   const [fit, setFit] = useState(defaultFit);
+  const [bikeSetup, setBikeSetup] = useState({ wheelset: DEFAULT_WHEELSET_ID });
 
   const bike = useMemo(() => {
     const sizeData = getTrekDomaneSize(selectedSize);
@@ -26,6 +28,8 @@ export function App() {
   }, [selectedSize]);
 
   const updateFit = (key, value) => setFit((current) => ({ ...current, [key]: value }));
+  const updateBikeSetup = (key, value) => setBikeSetup((current) => ({ ...current, [key]: value }));
+  const wheelset = getWheelset(bikeSetup.wheelset);
 
   return (
     <div className="app-shell">
@@ -54,9 +58,11 @@ export function App() {
           selectedSize={selectedSize}
           setSelectedSize={setSelectedSize}
           bike={bike}
+          bikeSetup={bikeSetup}
+          updateBikeSetup={updateBikeSetup}
         />
         <div className="main-stage">
-          <BikeVisualizer bike={bike} fit={fit} />
+          <BikeVisualizer bike={bike} fit={fit} wheelset={wheelset} />
         </div>
       </main>
     </div>

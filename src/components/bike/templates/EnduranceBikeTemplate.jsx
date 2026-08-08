@@ -1,7 +1,6 @@
 import frontRotor from "../../../assets/bikeTemplates/endurance/front-rotor.svg";
 import rearRotor from "../../../assets/bikeTemplates/endurance/rear-rotor.svg";
 import cassette from "../../../assets/bikeTemplates/endurance/cassette.svg";
-import wheel from "../../../assets/bikeTemplates/endurance/wheel.svg";
 import seatpost from "../../../assets/bikeTemplates/endurance/seatpost.svg";
 import saddle from "../../../assets/bikeTemplates/endurance/saddle.svg";
 import stem from "../../../assets/bikeTemplates/endurance/stem.svg";
@@ -42,6 +41,8 @@ import {
   ENDURANCE_VISUAL_BASE_SIZE,
   getEnduranceVisualDelta,
 } from "../../../data/enduranceGeometry.js";
+import { wheelsetVisuals } from "../../../config/wheelsetVisuals.js";
+import { DEFAULT_WHEELSET_ID, WHEELSET_CENTER } from "../../../config/wheelsets.js";
 
 const { anchors: sourceAnchors, layers } = FIGMA_ENDURANCE_TEMPLATE;
 const wheelDiameter = WHEEL_RADIUS * 2 * PROJECT_SCALE;
@@ -127,7 +128,7 @@ function FixedRotor({ axle, asset, layer, project, renderLayer }) {
   );
 }
 
-function FixedWheel({ axle, layer, project, renderLayer }) {
+function FixedWheel({ axle, asset, layer, project, renderLayer, wheelsetId, side }) {
   const center = project(axle);
   const wheelBox = {
     ...layer,
@@ -138,14 +139,21 @@ function FixedWheel({ axle, layer, project, renderLayer }) {
   };
 
   return (
-    <MotionLayer
-      center={center}
-      durationSeconds={PREVIEW_MOTION_CONFIG.wheelDurationSeconds}
-      renderLayer={renderLayer}
-      syncGroup="wheels"
+    <g
+      data-wheelset-id={wheelsetId}
+      data-wheel-side={side}
+      data-wheel-center-source="geometry-axle"
+      data-source-wheel-center={`${WHEELSET_CENTER.x},${WHEELSET_CENTER.y}`}
     >
-      <TemplateAsset asset={wheel} layer={wheelBox} className="figma-bike__wheel-asset" />
-    </MotionLayer>
+      <MotionLayer
+        center={center}
+        durationSeconds={PREVIEW_MOTION_CONFIG.wheelDurationSeconds}
+        renderLayer={renderLayer}
+        syncGroup="wheels"
+      >
+        <TemplateAsset key={`${wheelsetId}-${side}`} asset={asset} layer={wheelBox} className="figma-bike__wheel-asset" />
+      </MotionLayer>
+    </g>
   );
 }
 
@@ -284,7 +292,9 @@ function FigmaAnchorDebug({ matrices, parentAnchors, seatpostAnchors, headTubeDe
   );
 }
 
-export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false }) {
+export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false, wheelset }) {
+  const wheelsetId = wheelset?.id ?? DEFAULT_WHEELSET_ID;
+  const wheelVisual = wheelsetVisuals[wheelsetId] ?? wheelsetVisuals[DEFAULT_WHEELSET_ID];
   const projected = Object.fromEntries(
     Object.entries(data.anchors).map(([key, point]) => [key, project(point)]),
   );
@@ -466,6 +476,7 @@ export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false 
       data-top-tube-delta-identity-error={identityMatrixError(topTubeDeltaMatrix).toFixed(9)}
       data-down-tube-delta-identity-error={identityMatrixError(downTubeDeltaMatrix).toFixed(9)}
       data-preview-motion="always-on"
+      data-wheelset-id={wheelsetId}
     >
       {/* SVG render order follows the reversed Figma layer panel, except the
           user-prioritized chainring and drive crank render above all production parts. */}
@@ -475,8 +486,8 @@ export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false 
       <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} phaseOffset={180} renderLayer="non-drive-crank" syncGroup="crankset">
         <TemplateAsset asset={nonDriveCrank} layer={layers.nonDriveCrank} transform={nonDriveCrankMatrix} className="figma-bike__component figma-bike__non-drive-crank" />
       </MotionLayer>
-      <FixedWheel axle={data.frame.rearAxle} layer={layers.rearWheel} project={project} renderLayer="rear-wheel" />
-      <FixedWheel axle={data.frame.frontAxle} layer={layers.frontWheel} project={project} renderLayer="front-wheel" />
+      <FixedWheel axle={data.frame.rearAxle} asset={wheelVisual.rear} layer={layers.rearWheel} project={project} renderLayer="rear-wheel" wheelsetId={wheelsetId} side="rear" />
+      <FixedWheel axle={data.frame.frontAxle} asset={wheelVisual.front} layer={layers.frontWheel} project={project} renderLayer="front-wheel" wheelsetId={wheelsetId} side="front" />
       <TemplateAsset asset={seatpost} layer={layers.seatpost} transform={seatpostMatrix} className="figma-bike__component figma-bike__seatpost" renderLayer="seatpost" />
       <TemplateAsset asset={saddle} layer={layers.saddle} transform={saddleMatrix} className="figma-bike__component figma-bike__saddle" renderLayer="saddle" />
       <g className="figma-bike__cockpit" data-render-layer="cockpit">

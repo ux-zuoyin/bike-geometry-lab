@@ -10,10 +10,10 @@ import { AngleIndicator, ContactPoint, DimensionLine } from "./annotations.jsx";
 
 const IS_DEVELOPMENT = import.meta.env.DEV;
 
-function BikeLayer({ data, projector, showSkeleton, showFigmaAnchors }) {
+function BikeLayer({ data, projector, showSkeleton, showFigmaAnchors, wheelset }) {
   return (
     <g className="bike-layer bike-layer--primary">
-      <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} />
+      <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} wheelset={wheelset} />
       {showSkeleton && <GeometrySkeleton anchors={data.anchors} project={projector} />}
       <ContactPoint point={data.contacts.saddle} project={projector} label="S" kind="saddle" />
       <ContactPoint point={data.contacts.handlebar} project={projector} label="H" kind="handlebar" />
@@ -22,7 +22,7 @@ function BikeLayer({ data, projector, showSkeleton, showFigmaAnchors }) {
   );
 }
 
-export function BikeVisualizer({ bike, fit }) {
+export function BikeVisualizer({ bike, fit, wheelset }) {
   const [showDimensions, setShowDimensions] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [showSkeleton, setShowSkeleton] = useState(false);
@@ -59,6 +59,7 @@ export function BikeVisualizer({ bike, fit }) {
               projector={project}
               showSkeleton={IS_DEVELOPMENT && showSkeleton}
               showFigmaAnchors={IS_DEVELOPMENT && showFigmaAnchors}
+              wheelset={wheelset}
             />
 
             {showDimensions && (

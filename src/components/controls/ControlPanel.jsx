@@ -3,15 +3,20 @@ import { UploadSimple } from "@phosphor-icons/react";
 import { geometrySizes, moduleItems } from "../../data/bikes.js";
 import { ENDURANCE_VISUAL_BASE_SIZE, geometryFieldDefinitions } from "../../data/enduranceGeometry.js";
 import { endurancePreset } from "../../config/framePresets/endurance.js";
+import { wheelsets } from "../../config/wheelsets.js";
+import { wheelsetVisuals } from "../../config/wheelsetVisuals.js";
 import { SegmentedControl, Stepper } from "../ui/Stepper.jsx";
 
 function PanelHeader({ active }) {
   const module = moduleItems.find((item) => item.id === active);
+  const description = active === "components"
+    ? "视觉配件独立于车架 Geometry；当前仅开放 700C 轮组。"
+    : "当前唯一车型为 Trek Domane，所有长度数据统一使用 mm。";
   return (
     <header className="panel-heading">
       <span>MODULE {module.index}</span>
       <h2>{module.label}</h2>
-      <p>当前唯一车型为 Trek Domane，所有长度数据统一使用 mm。</p>
+      <p>{description}</p>
     </header>
   );
 }
@@ -121,6 +126,41 @@ function CrankControls({ fit, updateFit }) {
   );
 }
 
+function WheelsetControls({ bikeSetup, updateBikeSetup }) {
+  return (
+    <PanelSection title="轮组" hint="Wheelset Pair">
+      <div className="wheelset-options" role="radiogroup" aria-label="轮组类型">
+        {wheelsets.map((wheelset) => {
+          const isSelected = bikeSetup.wheelset === wheelset.id;
+          const visual = wheelsetVisuals[wheelset.id];
+          return (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              className={`wheelset-card${isSelected ? " is-selected" : ""}`}
+              key={wheelset.id}
+              onClick={() => updateBikeSetup("wheelset", wheelset.id)}
+              data-wheelset-option={wheelset.id}
+            >
+              <span className="wheelset-card__preview" aria-hidden="true">
+                <img src={visual.rear} alt="" />
+                <img src={visual.front} alt="" />
+              </span>
+              <span className="wheelset-card__copy">
+                <strong>{wheelset.name}</strong>
+                <small>{wheelset.description}</small>
+              </span>
+              <span className="wheelset-card__state">{isSelected ? "SELECTED" : "SELECT"}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="section-note">前后轮作为一套配置切换；轮径、车轴与碟片位置保持不变。</p>
+    </PanelSection>
+  );
+}
+
 function DataPanel({ bike }) {
   const inputRef = useRef(null);
   const [preview, setPreview] = useState(null);
@@ -152,12 +192,13 @@ function DataPanel({ bike }) {
   );
 }
 
-export function ControlPanel({ active, fit, updateFit, selectedSize, setSelectedSize, bike }) {
+export function ControlPanel({ active, fit, updateFit, selectedSize, setSelectedSize, bike, bikeSetup, updateBikeSetup }) {
   let content;
   if (active === "frame") content = <FrameControls bike={bike} selectedSize={selectedSize} setSelectedSize={setSelectedSize} />;
   if (active === "cockpit") content = <CockpitControls fit={fit} updateFit={updateFit} />;
   if (active === "saddle") content = <SaddleControls fit={fit} updateFit={updateFit} />;
   if (active === "crank") content = <CrankControls fit={fit} updateFit={updateFit} />;
+  if (active === "components") content = <WheelsetControls bikeSetup={bikeSetup} updateBikeSetup={updateBikeSetup} />;
   if (active === "data") content = <DataPanel bike={bike} />;
 
   return (

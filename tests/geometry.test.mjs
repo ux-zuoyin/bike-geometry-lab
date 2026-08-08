@@ -7,9 +7,16 @@ import {
   defaultFit,
   geometrySizes,
   getTrekDomaneSize,
+  moduleItems,
   toBikeGeometry,
   trekDomane,
 } from "../src/data/bikes.js";
+import {
+  DEFAULT_WHEELSET_ID,
+  WHEELSET_CENTER,
+  getWheelset,
+  wheelsets,
+} from "../src/config/wheelsets.js";
 import { buildBikeGeometry } from "../src/lib/geometry/index.js";
 import { bikeArchetypes } from "../src/config/bikeArchetypes.js";
 import { taperedTubePath } from "../src/lib/bikeVisual/pathGeometry.js";
@@ -48,6 +55,15 @@ const enduranceTemplateSource = readFileSync(
 );
 const bikeVisualizerSource = readFileSync(
   new URL("../src/components/visualizer/BikeVisualizer.jsx", import.meta.url),
+  "utf8",
+);
+const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+const controlPanelSource = readFileSync(
+  new URL("../src/components/controls/ControlPanel.jsx", import.meta.url),
+  "utf8",
+);
+const wheelsetVisualsSource = readFileSync(
+  new URL("../src/config/wheelsetVisuals.js", import.meta.url),
   "utf8",
 );
 
@@ -97,6 +113,52 @@ test("Trek Domane is the only catalog model and stores all seven sizes in millim
   assert.equal(size56.stackMm, 591);
   assert.equal(size56.seatTubeAngleDeg, 73.3);
   assert.equal(size56.wheelSize, "700c");
+});
+
+test("Bike Components exposes three paired 700C wheelsets with a shared explicit center anchor", () => {
+  assert.equal(DEFAULT_WHEELSET_ID, "midProfile");
+  assert.deepEqual(WHEELSET_CENTER, { x: 240, y: 240 });
+  assert.deepEqual(wheelsets.map(({ id, name, wheelSize }) => [id, name, wheelSize]), [
+    ["lowProfile", "低框轮组", "700c"],
+    ["midProfile", "中框轮组", "700c"],
+    ["deepProfile", "高框轮组", "700c"],
+  ]);
+  assert.equal(getWheelset("unknown").id, DEFAULT_WHEELSET_ID);
+  assert.deepEqual(wheelsets.map(({ figma }) => figma.groupNodeId), ["2:948", "2:979", "2:994"]);
+  assert.ok(moduleItems.some(({ id, label }) => id === "components" && label === "车身配件"));
+});
+
+test("wheelset visuals replace only the paired Figma wheel assets and stay axle-driven", () => {
+  for (const assetName of [
+    "wheel-low-profile.svg",
+    "wheel-mid-profile.svg",
+    "wheel-deep-profile-front.svg",
+    "wheel-deep-profile-rear.svg",
+  ]) {
+    const source = readFileSync(
+      new URL(`../src/assets/bikeTemplates/endurance/${assetName}`, import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /viewBox="0 0 480 480"/);
+  }
+  assert.match(wheelsetVisualsSource, /lowProfile: \{[\s\S]*front: lowProfileWheel,[\s\S]*rear: lowProfileWheel/);
+  assert.match(wheelsetVisualsSource, /midProfile: \{[\s\S]*front: midProfileWheel,[\s\S]*rear: midProfileWheel/);
+  assert.match(wheelsetVisualsSource, /deepProfile: \{[\s\S]*front: deepProfileFrontWheel,[\s\S]*rear: deepProfileRearWheel/);
+  assert.match(enduranceTemplateSource, /const center = project\(axle\)/);
+  assert.match(enduranceTemplateSource, /data-wheel-center-source="geometry-axle"/);
+  assert.match(enduranceTemplateSource, /asset=\{wheelVisual\.rear\}/);
+  assert.match(enduranceTemplateSource, /asset=\{wheelVisual\.front\}/);
+  assert.match(enduranceTemplateSource, /asset=\{frontRotor\}/);
+  assert.match(enduranceTemplateSource, /asset=\{rearRotor\}/);
+});
+
+test("wheelset Bike Setup state is independent from Domane size state", () => {
+  assert.match(appSource, /useState\(\{ wheelset: DEFAULT_WHEELSET_ID \}\)/);
+  assert.match(appSource, /useState\(trekDomane\.visualBaseSize\)/);
+  assert.match(appSource, /<BikeVisualizer bike=\{bike\} fit=\{fit\} wheelset=\{wheelset\} \/>/);
+  assert.match(controlPanelSource, /role="radiogroup" aria-label="轮组类型"/);
+  assert.match(controlPanelSource, /updateBikeSetup\("wheelset", wheelset\.id\)/);
+  assert.doesNotMatch(appSource, /setBikeSetup\([^\n]*selectedSize/);
 });
 
 test("all Trek Domane source rows preserve the supplied normalized geometry fields", () => {

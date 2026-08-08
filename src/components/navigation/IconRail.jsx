@@ -5,6 +5,7 @@ import {
   Armchair,
   CircleNotch,
   Database,
+  Tire,
 } from "@phosphor-icons/react";
 import { moduleItems } from "../../data/bikes.js";
 
@@ -13,6 +14,7 @@ const icons = {
   cockpit: SlidersHorizontal,
   saddle: Armchair,
   crank: CircleNotch,
+  components: Tire,
   data: Database,
 };
 
