@@ -467,8 +467,8 @@ export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false 
       data-down-tube-delta-identity-error={identityMatrixError(downTubeDeltaMatrix).toFixed(9)}
       data-preview-motion="always-on"
     >
-      {/* SVG render order is intentionally reversed from Figma layer panel.
-          Do not reorder without checking the Figma EnduranceBike source. */}
+      {/* SVG render order follows the reversed Figma layer panel, except the
+          user-prioritized chainring and drive crank render above all production parts. */}
       <FixedRotor axle={data.frame.frontAxle} asset={frontRotor} layer={layers.frontRotor} project={project} renderLayer="front-rotor" />
       <FixedRotor axle={data.frame.rearAxle} asset={rearRotor} layer={layers.rearRotor} project={project} renderLayer="rear-rotor" />
       <TemplateAsset asset={cassette} layer={layers.cassette} transform={rearMatrix} className="figma-bike__component figma-bike__cassette" renderLayer="cassette" />
@@ -493,14 +493,14 @@ export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false 
         <TemplateAsset asset={frameSeatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
         <TemplateAsset asset={frameBottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
       </g>
+      <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" renderLayer="chain" />
+      <TemplateAsset asset={derailleur} layer={layers.derailleur} transform={rearMatrix} className="figma-bike__component figma-bike__derailleur" renderLayer="derailleur" />
       <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} renderLayer="chainring" syncGroup="crankset">
         <TemplateAsset asset={chainring} layer={layers.chainring} transform={bbMatrix} className="figma-bike__component figma-bike__chainring" />
       </MotionLayer>
       <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} renderLayer="drive-crank" syncGroup="crankset">
         <TemplateAsset asset={driveCrank} layer={layers.driveCrank} transform={driveCrankMatrix} className="figma-bike__component figma-bike__drive-crank" />
       </MotionLayer>
-      <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" renderLayer="chain" />
-      <TemplateAsset asset={derailleur} layer={layers.derailleur} transform={rearMatrix} className="figma-bike__component figma-bike__derailleur" renderLayer="derailleur" />
       {showFigmaAnchors && (
         <FigmaAnchorDebug
           matrices={matrices}

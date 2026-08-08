@@ -242,7 +242,7 @@ test("Figma endurance frame uses the new semantic split nodes", () => {
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frame, undefined);
 });
 
-test("Endurance SVG render order is the reverse of the Figma root layer panel", () => {
+test("Endurance SVG keeps the chainring and drive crank above every production part", () => {
   const renderOrderTokens = [
     'renderLayer="front-rotor"',
     'renderLayer="rear-rotor"',
@@ -255,10 +255,10 @@ test("Endurance SVG render order is the reverse of the Figma root layer panel", 
     'data-render-layer="cockpit"',
     'renderLayer="fork"',
     'data-render-layer="frame"',
-    'renderLayer="chainring"',
-    'renderLayer="drive-crank"',
     'renderLayer="chain"',
     'renderLayer="derailleur"',
+    'renderLayer="chainring"',
+    'renderLayer="drive-crank"',
     "{showFigmaAnchors && (",
   ];
   let previousIndex = -1;
@@ -267,8 +267,7 @@ test("Endurance SVG render order is the reverse of the Figma root layer panel", 
     assert.ok(index > previousIndex, `${token} must render after the preceding Figma layer`);
     previousIndex = index;
   }
-  assert.match(enduranceTemplateSource, /SVG render order is intentionally reversed from Figma layer panel\./);
-  assert.match(enduranceTemplateSource, /Do not reorder without checking the Figma EnduranceBike source\./);
+  assert.match(enduranceTemplateSource, /user-prioritized chainring and drive crank render above all production parts\./);
 });
 
 test("preview motion is permanently enabled, infinitely looping, and calmly paced", () => {
