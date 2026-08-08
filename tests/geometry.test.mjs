@@ -270,9 +270,12 @@ test("Endurance SVG keeps the chainring and drive crank above every production p
   assert.match(enduranceTemplateSource, /user-prioritized chainring and drive crank render above all production parts\./);
 });
 
-test("preview motion is permanently enabled, infinitely looping, and calmly paced", () => {
-  assert.equal(PREVIEW_MOTION_CONFIG.wheelDurationSeconds, 4.2);
-  assert.equal(PREVIEW_MOTION_CONFIG.crankDurationSeconds, 6.4);
+test("preview motion is permanently enabled, infinitely looping, and based on 80 RPM cadence", () => {
+  assert.equal(PREVIEW_MOTION_CONFIG.cadenceRpm, 80);
+  assert.equal(PREVIEW_MOTION_CONFIG.wheelRpm, 100);
+  assert.equal(PREVIEW_MOTION_CONFIG.wheelDurationSeconds, 0.6);
+  assert.equal(PREVIEW_MOTION_CONFIG.crankDurationSeconds, 0.75);
+  assert.equal(PREVIEW_MOTION_CONFIG.crankDurationSeconds, 60 / PREVIEW_MOTION_CONFIG.cadenceRpm);
   assert.ok(PREVIEW_MOTION_CONFIG.wheelDurationSeconds < PREVIEW_MOTION_CONFIG.crankDurationSeconds);
   assert.deepEqual(getRotationAnimation({ x: 430, y: 420 }), {
     from: "0 430 420",
