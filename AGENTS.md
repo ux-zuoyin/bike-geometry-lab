@@ -15,9 +15,9 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - The Figma Endurance template is calibrated to Trek Domane size 56. Size 56 is the zero-deformation visual baseline; every other size is a geometry delta from 56, never an overall frame scale.
 - The Endurance SVG root render order must stay reversed from the Figma layer panel: front rotor, rear rotor, cassette, non-drive crank, rear wheel, front wheel, seatpost, saddle, cockpit, fork, frame, chainring, drive crank, chain, derailleur, then optional debug anchors. Control this with SVG DOM order, not CSS `z-index`.
 - Geometry/debug anchors are hidden by default and, when enabled, must render as the final SVG child so no bike part can cover them. Keep rotors independent from wheel groups so the Figma drivetrain/wheel stacking remains representable.
-- Bike Preview Motion is an optional, default-OFF SVG preview mode. Use geometry-projected front axle, rear axle, and BB coordinates as explicit `animateTransform` rotation centers; never use SVG bounding-box centers.
+- Bike Preview Motion is permanently enabled and has no static mode or UI toggle. Use geometry-projected front axle, rear axle, and BB coordinates as explicit `animateTransform` rotation centers; never use SVG bounding-box centers.
 - Front/rear wheels and rotors share a calm 4.2-second linear cycle. Chainring and both cranks share a slower 6.4-second cycle. The non-drive crank starts from the geometry-mapped point exactly opposite the drive pedal, then receives the same rotation cycle so the 180° phase relationship is preserved.
-- Turning Preview Motion off must remove all animation nodes and return to the existing static Figma visual. Size changes must rebuild animation centers from the new geometry without altering root SVG render order.
+- Every rotating part must render an infinite SVG animation (`repeatCount="indefinite"`). Size changes rebuild animation centers from the new geometry without altering root SVG render order.
 - Desktop-only UI is intentional; do not spend scope on mobile adaptation.
 
 - Render a complete, standardized side-view road bike between technical diagram and flat product illustration; do not fall back to centerline-only frame tubes.

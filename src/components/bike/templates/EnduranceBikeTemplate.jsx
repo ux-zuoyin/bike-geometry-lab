@@ -79,37 +79,35 @@ function TemplateAsset({ asset, layer, transform, className, renderLayer }) {
   );
 }
 
-function MotionLayer({ children, center, durationSeconds, enabled, phaseOffset = 0, renderLayer, syncGroup }) {
+function MotionLayer({ children, center, durationSeconds, phaseOffset = 0, renderLayer, syncGroup }) {
   const rotation = getRotationAnimation(center);
   return (
     <g
       className="figma-bike__motion-layer"
       data-render-layer={renderLayer}
-      data-motion-enabled={enabled ? "true" : "false"}
+      data-motion-enabled="true"
       data-motion-origin-x={center.x}
       data-motion-origin-y={center.y}
       data-motion-duration={durationSeconds}
       data-motion-phase-offset={phaseOffset}
       data-motion-sync-group={syncGroup}
     >
-      {enabled && (
-        <animateTransform
-          key={`${renderLayer}-${center.x}-${center.y}`}
-          attributeName="transform"
-          type="rotate"
-          from={rotation.from}
-          to={rotation.to}
-          dur={`${durationSeconds}s`}
-          repeatCount="indefinite"
-          calcMode="linear"
-        />
-      )}
+      <animateTransform
+        key={`${renderLayer}-${center.x}-${center.y}`}
+        attributeName="transform"
+        type="rotate"
+        from={rotation.from}
+        to={rotation.to}
+        dur={`${durationSeconds}s`}
+        repeatCount="indefinite"
+        calcMode="linear"
+      />
       {children}
     </g>
   );
 }
 
-function FixedRotor({ axle, asset, layer, motionEnabled, project, renderLayer }) {
+function FixedRotor({ axle, asset, layer, project, renderLayer }) {
   const center = project(axle);
   const rotorTransform = uniformAroundPoint(
     { x: layer.x + layer.width / 2, y: layer.y + layer.height / 2 },
@@ -121,7 +119,6 @@ function FixedRotor({ axle, asset, layer, motionEnabled, project, renderLayer })
     <MotionLayer
       center={center}
       durationSeconds={PREVIEW_MOTION_CONFIG.wheelDurationSeconds}
-      enabled={motionEnabled}
       renderLayer={renderLayer}
       syncGroup="wheels"
     >
@@ -130,7 +127,7 @@ function FixedRotor({ axle, asset, layer, motionEnabled, project, renderLayer })
   );
 }
 
-function FixedWheel({ axle, layer, motionEnabled, project, renderLayer }) {
+function FixedWheel({ axle, layer, project, renderLayer }) {
   const center = project(axle);
   const wheelBox = {
     ...layer,
@@ -144,7 +141,6 @@ function FixedWheel({ axle, layer, motionEnabled, project, renderLayer }) {
     <MotionLayer
       center={center}
       durationSeconds={PREVIEW_MOTION_CONFIG.wheelDurationSeconds}
-      enabled={motionEnabled}
       renderLayer={renderLayer}
       syncGroup="wheels"
     >
@@ -288,7 +284,7 @@ function FigmaAnchorDebug({ matrices, parentAnchors, seatpostAnchors, headTubeDe
   );
 }
 
-export function EnduranceBikeTemplate({ data, motionEnabled = false, project, showFigmaAnchors = false }) {
+export function EnduranceBikeTemplate({ data, project, showFigmaAnchors = false }) {
   const projected = Object.fromEntries(
     Object.entries(data.anchors).map(([key, point]) => [key, project(point)]),
   );
@@ -469,18 +465,18 @@ export function EnduranceBikeTemplate({ data, motionEnabled = false, project, sh
       data-head-tube-delta-identity-error={identityMatrixError(headTubeDeltaMatrix).toFixed(9)}
       data-top-tube-delta-identity-error={identityMatrixError(topTubeDeltaMatrix).toFixed(9)}
       data-down-tube-delta-identity-error={identityMatrixError(downTubeDeltaMatrix).toFixed(9)}
-      data-preview-motion={motionEnabled ? "on" : "off"}
+      data-preview-motion="always-on"
     >
       {/* SVG render order is intentionally reversed from Figma layer panel.
           Do not reorder without checking the Figma EnduranceBike source. */}
-      <FixedRotor axle={data.frame.frontAxle} asset={frontRotor} layer={layers.frontRotor} motionEnabled={motionEnabled} project={project} renderLayer="front-rotor" />
-      <FixedRotor axle={data.frame.rearAxle} asset={rearRotor} layer={layers.rearRotor} motionEnabled={motionEnabled} project={project} renderLayer="rear-rotor" />
+      <FixedRotor axle={data.frame.frontAxle} asset={frontRotor} layer={layers.frontRotor} project={project} renderLayer="front-rotor" />
+      <FixedRotor axle={data.frame.rearAxle} asset={rearRotor} layer={layers.rearRotor} project={project} renderLayer="rear-rotor" />
       <TemplateAsset asset={cassette} layer={layers.cassette} transform={rearMatrix} className="figma-bike__component figma-bike__cassette" renderLayer="cassette" />
-      <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} enabled={motionEnabled} phaseOffset={180} renderLayer="non-drive-crank" syncGroup="crankset">
+      <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} phaseOffset={180} renderLayer="non-drive-crank" syncGroup="crankset">
         <TemplateAsset asset={nonDriveCrank} layer={layers.nonDriveCrank} transform={nonDriveCrankMatrix} className="figma-bike__component figma-bike__non-drive-crank" />
       </MotionLayer>
-      <FixedWheel axle={data.frame.rearAxle} layer={layers.rearWheel} motionEnabled={motionEnabled} project={project} renderLayer="rear-wheel" />
-      <FixedWheel axle={data.frame.frontAxle} layer={layers.frontWheel} motionEnabled={motionEnabled} project={project} renderLayer="front-wheel" />
+      <FixedWheel axle={data.frame.rearAxle} layer={layers.rearWheel} project={project} renderLayer="rear-wheel" />
+      <FixedWheel axle={data.frame.frontAxle} layer={layers.frontWheel} project={project} renderLayer="front-wheel" />
       <TemplateAsset asset={seatpost} layer={layers.seatpost} transform={seatpostMatrix} className="figma-bike__component figma-bike__seatpost" renderLayer="seatpost" />
       <TemplateAsset asset={saddle} layer={layers.saddle} transform={saddleMatrix} className="figma-bike__component figma-bike__saddle" renderLayer="saddle" />
       <g className="figma-bike__cockpit" data-render-layer="cockpit">
@@ -497,10 +493,10 @@ export function EnduranceBikeTemplate({ data, motionEnabled = false, project, sh
         <TemplateAsset asset={frameSeatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
         <TemplateAsset asset={frameBottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
       </g>
-      <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} enabled={motionEnabled} renderLayer="chainring" syncGroup="crankset">
+      <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} renderLayer="chainring" syncGroup="crankset">
         <TemplateAsset asset={chainring} layer={layers.chainring} transform={bbMatrix} className="figma-bike__component figma-bike__chainring" />
       </MotionLayer>
-      <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} enabled={motionEnabled} renderLayer="drive-crank" syncGroup="crankset">
+      <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} renderLayer="drive-crank" syncGroup="crankset">
         <TemplateAsset asset={driveCrank} layer={layers.driveCrank} transform={driveCrankMatrix} className="figma-bike__component figma-bike__drive-crank" />
       </MotionLayer>
       <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" renderLayer="chain" />

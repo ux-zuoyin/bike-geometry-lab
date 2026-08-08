@@ -1,5 +1,4 @@
 export const PREVIEW_MOTION_CONFIG = Object.freeze({
-  enabledByDefault: false,
   wheelDurationSeconds: 4.2,
   crankDurationSeconds: 6.4,
 });

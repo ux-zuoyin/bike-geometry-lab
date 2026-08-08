@@ -46,6 +46,10 @@ const enduranceTemplateSource = readFileSync(
   new URL("../src/components/bike/templates/EnduranceBikeTemplate.jsx", import.meta.url),
   "utf8",
 );
+const bikeVisualizerSource = readFileSync(
+  new URL("../src/components/visualizer/BikeVisualizer.jsx", import.meta.url),
+  "utf8",
+);
 
 test("frame points respect stack and reach", () => {
   const geometry = enduranceGeometrySizes[56];
@@ -267,8 +271,7 @@ test("Endurance SVG render order is the reverse of the Figma root layer panel", 
   assert.match(enduranceTemplateSource, /Do not reorder without checking the Figma EnduranceBike source\./);
 });
 
-test("preview motion uses explicit geometry centers and a calm default cadence", () => {
-  assert.equal(PREVIEW_MOTION_CONFIG.enabledByDefault, false);
+test("preview motion is permanently enabled, infinitely looping, and calmly paced", () => {
   assert.equal(PREVIEW_MOTION_CONFIG.wheelDurationSeconds, 4.2);
   assert.equal(PREVIEW_MOTION_CONFIG.crankDurationSeconds, 6.4);
   assert.ok(PREVIEW_MOTION_CONFIG.wheelDurationSeconds < PREVIEW_MOTION_CONFIG.crankDurationSeconds);
@@ -276,6 +279,10 @@ test("preview motion uses explicit geometry centers and a calm default cadence",
     from: "0 430 420",
     to: "360 430 420",
   });
+  assert.match(enduranceTemplateSource, /data-preview-motion="always-on"/);
+  assert.match(enduranceTemplateSource, /repeatCount="indefinite"/);
+  assert.doesNotMatch(enduranceTemplateSource, /motionEnabled/);
+  assert.doesNotMatch(bikeVisualizerSource, /Preview Motion/);
 });
 
 test("non-drive crank starts exactly opposite the drive crank and shares its rotation cycle", () => {
