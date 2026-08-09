@@ -24,6 +24,7 @@ Bike Geometry Lab 是一个面向桌面端的公路车几何、骑行设定与�
 - Prism 工作区环境光、地面定位和字面镜像反射
 - 三栏工程视图与可逆的舞台全屏模式
 - Geometry Details 支持中文 / English 标签切换
+- 官网几何图通过独立服务端 Parser 读取，并在 Review 中保留逐项校对能力
 
 ## 技术栈
 
@@ -107,6 +108,36 @@ Frame size 只重建产品 Geometry；Fit Setup 只移动骑行接触点和安�
 
 典型 Pages workflow 应发布 `dist/client` 目录。构建后的 HTML 和静态资源链接会自动带上仓库子路径。
 
+GitHub Pages 只提供静态前端，不会执行 Geometry Parser。真实图片识别部署为独立 Worker，前端通过公开的 `VITE_GEOMETRY_PARSER_ENDPOINT` 指向它；OpenAI API Key 只存在于 Worker Secret，不能放入任何 `VITE_*` 变量。
+
+## Geometry Image Parser
+
+Parser Endpoint：
+
+```text
+POST /api/geometry/parse
+Content-Type: multipart/form-data
+image: 当前用户选择的 PNG / JPG / JPEG 文件
+```
+
+独立 Worker 使用 `wrangler.geometry-parser.toml`，生产 Provider 默认为阿里云百炼 `qwen3-vl-flash`。部署前需将 `DASHSCOPE_COMPATIBLE_BASE_URL` 中的 Workspace ID 替换为华北 2（北京）业务空间 ID、设置生产域名白名单，并配置服务端 Secret：
+
+```bash
+npx wrangler secret put DASHSCOPE_API_KEY --config wrangler.geometry-parser.toml
+```
+
+`GEOMETRY_PARSER_PROVIDER` 只接受显式的 `qwen` 或 `openai`，Provider 失败不会自动切换。OpenAI Provider 仅作为未启用的备用实现保留；默认生产配置不会调用 OpenAI。
+
+前端只配置 Worker 的公开地址：
+
+```bash
+VITE_GEOMETRY_PARSER_ENDPOINT=https://your-parser-worker.example.com/api/geometry/parse
+```
+
+生产分析没有 Mock fallback。Worker 或模型失败时，Import Flow 进入明确的 error 状态；测试通过依赖注入使用 `tests/fixtures`，不会请求真实 API。
+
+Worker 收到 Structured Output 后会再次按 `detectedSizes` 对齐各车型列，并自行重算所有 `fieldColumnCounts`。重复尺码、无法对齐的尺码集合会直接拒绝；缺失单元格保留为 `null` 和 warning，不会删除整列或把相邻值错移到其他尺码。
+
 ## Sites 构建
 
 `npm run build` 除了生成 Vite 客户端，还会保留并复制以下 Sites 集成文件：
@@ -126,4 +157,3 @@ Frame size 只重建产品 Geometry；Fit Setup 只移动骑行接触点和安�
 - 不通过改变 wheel scale、axle 或 BB 来修正视觉位置。
 - Prism、Reflection、Ground Alignment 和 S/H/P 属于当前正式能力。
 - Debug 与 calibration UI 必须保持开发环境专用。
-

@@ -468,6 +468,7 @@ export function EnduranceBikeTemplate({
   showContactPoints = true,
   componentSetup,
   motionStopped = false,
+  frameOnly = false,
 }) {
   const components = componentSetup ?? resolveComponentSetup(DEFAULT_COMPONENT_SETUP);
   const frameAssets = {
@@ -793,6 +794,7 @@ export function EnduranceBikeTemplate({
     >
       {/* SVG render order follows the reversed Figma layer panel, except the
           user-prioritized chainring and drive crank render above all production parts. */}
+      {!frameOnly && <>
       <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} phaseOffset={180} renderLayer="non-drive-crank" syncGroup="crankset">
         <g
           data-non-drive-crank-mirror="scaleX(-1)"
@@ -819,6 +821,7 @@ export function EnduranceBikeTemplate({
           <TemplateAsset asset={handlebarTapeAsset} layer={layers.handlebarTape} transform={handlebarMatrix} className="figma-bike__component figma-bike__handlebar figma-bike__handlebar-tape" />
         </g>
       </g>
+      </>}
       <TemplateAsset asset={forkAsset} layer={layers.fork} transform={forkMatrix} className="figma-bike__fork" renderLayer="fork" />
       <g className="figma-bike__frame-stack" data-render-layer="frame" data-frame-color={components.frameColor}>
         <TemplateAsset asset={frameAssets.downTube} layer={layers.frameDownTube} transform={downTubeMatrix} className="figma-bike__frame-part figma-bike__down-tube" />
@@ -829,6 +832,7 @@ export function EnduranceBikeTemplate({
         <TemplateAsset asset={frameAssets.seatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
         <TemplateAsset asset={frameAssets.bottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
       </g>
+      {!frameOnly && <>
       <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" renderLayer="chain" />
       <TemplateAsset asset={components.drivetrain.visualResource} layer={components.drivetrain.sourceBounds} transform={rearMatrix} className="figma-bike__component figma-bike__drivetrain" renderLayer="drivetrain" />
       <MotionLayer center={projected.bottomBracket} durationSeconds={PREVIEW_MOTION_CONFIG.crankDurationSeconds} renderLayer="chainring" syncGroup="crankset">
@@ -864,6 +868,7 @@ export function EnduranceBikeTemplate({
           <HandlebarContactMarker point={handlebarContactPoint} />
         </g>
       )}
+      </>}
     </g>
   );
 }

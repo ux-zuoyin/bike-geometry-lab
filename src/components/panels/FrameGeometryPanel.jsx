@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { geometrySizes } from "../../data/bikes.js";
 import { ColorPalette } from "../ui/ColorPalette.jsx";
 import { SegmentedControl } from "../ui/Stepper.jsx";
+import { GeometryImportFlow } from "../import/GeometryImportFlow.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 
 const GEOMETRY_LANGUAGE_STORAGE_KEY = "bike-geometry-lab:geometry-language";
@@ -18,8 +18,11 @@ const geometryDetails = [
   { key: "standoverMm", unit: "mm", zh: "跨高", en: "Standover" },
 ];
 
-export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSetup, updateComponentSetup, isStageFullscreen = false }) {
+const displayGeometryValue = (value) => (value == null || value === "" ? "未识别" : value);
+
+export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, geometryImport, isStageFullscreen = false }) {
   const sizeData = bike.sizeData;
+  const isImportReady = geometryImport.status === "ready";
   const [geometryLanguage, setGeometryLanguage] = useState(() => {
     try {
       return window.localStorage.getItem(GEOMETRY_LANGUAGE_STORAGE_KEY) === "en" ? "en" : "zh";
@@ -40,22 +43,43 @@ export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSe
     <aside className="side-panel frame-panel" aria-label="车架与几何" aria-hidden={isStageFullscreen} inert={isStageFullscreen ? true : undefined}>
       <header className="panel-heading">
         <h2>车架几何</h2>
-        <p>选择车型与尺码。几何尺寸采用 Trek Domane 官方数据。</p>
+        <p>{isImportReady ? `选择车型与尺码。当前使用${bike.sourceLabel}。` : "请核对 AI 初步提取的车架几何数据。"}</p>
       </header>
 
       <div className="side-panel__scroll">
-        <PanelSection title="车型">
-          <article className="model-card is-selected" aria-label="Trek Domane 耐力型，7 个尺码">
+        {!isImportReady ? (
+          <GeometryImportFlow {...geometryImport} />
+        ) : (
+          <>
+        <PanelSection
+          title="车型"
+          className="frame-model-section"
+          action={(
+            <div className={`model-action-slot${bike.source === "upload" ? " is-visible" : ""}`} aria-hidden={bike.source !== "upload"}>
+              <button
+                type="button"
+                className="panel-quiet-action"
+                tabIndex={bike.source === "upload" ? 0 : -1}
+                onClick={geometryImport.onEdit}
+              >
+                修改几何参数
+              </button>
+            </div>
+          )}
+        >
+          <article className="model-card is-selected" aria-label={`${bike.brand} ${bike.model} 耐力型，${bike.sizes.length} 个尺码`}>
             <div className="model-card__identity">
               <strong>{bike.brand} {bike.model}</strong>
               <span>{bike.categoryLabel}</span>
             </div>
-            <small>{geometrySizes.length} 个尺码</small>
+            <small className="model-card__size-count">{bike.sizes.length} 个尺码</small>
           </article>
         </PanelSection>
 
-        <PanelSection title="尺码" hint={`已选择 · ${frameState.size}`}>
-          <SegmentedControl options={geometrySizes} value={frameState.size} onChange={setFrameSize} />
+        <PanelSection title="尺码" hint={`已选择 · ${bike.size}`} className="frame-size-section">
+          <div className="size-selector-area">
+            <SegmentedControl options={bike.sizes} value={bike.size} onChange={setFrameSize} />
+          </div>
           <p className="section-note">切换尺码不会改变右侧骑行设定和配件选择。</p>
         </PanelSection>
 
@@ -63,14 +87,14 @@ export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSe
           <div className="frame-appearance__palette">
             <ColorPalette
               label="车架颜色"
-              value={componentSetup.frameColor}
+              value={bike.frameColor}
               onChange={(value) => updateComponentSetup("frameColor", value)}
             />
           </div>
           <div className="frame-appearance__palette">
             <ColorPalette
               label="前叉颜色"
-              value={componentSetup.forkColor}
+              value={bike.forkColor}
               onChange={(value) => updateComponentSetup("forkColor", value)}
             />
           </div>
@@ -86,8 +110,10 @@ export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSe
             ].map(([label, value]) => (
               <div key={label}>
                 <span>{label}</span>
-                <strong>{value}</strong>
-                <small>mm</small>
+                <div className="geometry-grid__value">
+                  <strong>{displayGeometryValue(value)}</strong>
+                  <small aria-hidden={value == null}>{value != null ? "mm" : ""}</small>
+                </div>
               </div>
             ))}
           </div>
@@ -95,7 +121,7 @@ export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSe
 
         <PanelSection
           title="几何详情"
-          hint="官方数据"
+          hint={bike.sourceLabel}
           action={(
             <div className="geometry-language-toggle" role="group" aria-label="几何参数语言">
               <button
@@ -121,14 +147,19 @@ export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSe
             {geometryDetails.map(({ key, unit, ...labels }) => (
               <div key={key} data-geometry-field={key}>
                 <dt>{labels[geometryLanguage]}</dt>
-                <dd><strong>{sizeData[key]}</strong><span>{unit}</span></dd>
+                <dd>
+                  <strong>{displayGeometryValue(sizeData[key])}</strong>
+                  <span aria-hidden={sizeData[key] == null}>{sizeData[key] != null ? unit : ""}</span>
+                </dd>
               </div>
             ))}
           </dl>
         </PanelSection>
+          </>
+        )}
       </div>
 
-      <footer><span className="status-dot" /> Trek Domane 官方几何 · mm / °</footer>
+      <footer><span className="status-dot" />{isImportReady ? `${bike.brand} ${bike.model} · ${bike.sourceLabel} · mm / °` : "本地图片 · AI 初步提取 · 不上传"}</footer>
     </aside>
   );
 }

@@ -71,6 +71,31 @@ import {
   PRISM_GROUND_Y_RATIO,
   getBikeStageGroundAlignment,
 } from "../src/lib/bikeVisual/stageGroundAlignment.js";
+import {
+  ACTIVE_BIKES,
+  createBikeFromGeometryImport,
+  createComparisonBike,
+  getRenderableComponentSetup,
+  updateBikeSize,
+  updateBikeGeometry,
+} from "../src/state/dualBikeState.js";
+import { getSTRProfile } from "../src/lib/geometry/strProfile.js";
+import {
+  addGeometryImportDraftSize,
+  GEOMETRY_IMPORT_FIELDS,
+  GEOMETRY_IMPORT_STATUSES,
+  importGeometryToSizeData,
+  updateGeometryImportDraftField,
+  validateGeometryImportDraft,
+} from "../src/state/geometryImportState.js";
+import {
+  MAX_BIKES,
+  addWorkspaceBike,
+  deleteWorkspaceBike,
+  replaceWorkspaceBike,
+} from "../src/state/workspaceBikes.js";
+import { createMockGeometryImportDraft } from "../src/data/mockGeometryImport.js";
+import { WELCOME_COMPLETED_STORAGE_KEY } from "../src/config/welcomePersistence.js";
 
 const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.a - 1),
@@ -89,8 +114,16 @@ const bikeVisualizerSource = readFileSync(
   new URL("../src/components/visualizer/BikeVisualizer.jsx", import.meta.url),
   "utf8",
 );
+const fullscreenGeometrySummarySource = readFileSync(
+  new URL("../src/components/visualizer/FullscreenGeometrySummary.jsx", import.meta.url),
+  "utf8",
+);
 const roadBikeVisualSource = readFileSync(
   new URL("../src/components/visualizer/bikeParts/RoadBikeVisual.jsx", import.meta.url),
+  "utf8",
+);
+const dualBikeControlsSource = readFileSync(
+  new URL("../src/components/comparison/DualBikeControls.jsx", import.meta.url),
   "utf8",
 );
 const prismSource = readFileSync(
@@ -125,6 +158,18 @@ const frameChainstaySource = readFileSync(
 );
 const framePanelSource = readFileSync(
   new URL("../src/components/panels/FrameGeometryPanel.jsx", import.meta.url),
+  "utf8",
+);
+const geometryImportFlowSource = readFileSync(
+  new URL("../src/components/import/GeometryImportFlow.jsx", import.meta.url),
+  "utf8",
+);
+const welcomeGateSource = readFileSync(
+  new URL("../src/components/import/WelcomeGate.jsx", import.meta.url),
+  "utf8",
+);
+const geometryImageAnalyzerSource = readFileSync(
+  new URL("../src/services/geometryImageAnalyzer.js", import.meta.url),
   "utf8",
 );
 const setupPanelSource = readFileSync(
@@ -684,23 +729,213 @@ test("Cassette is registry-driven, RearAxle-centered, and synchronized with rear
   assert.doesNotMatch(enduranceTemplateSource, /bikeTemplates\/endurance\/cassette\.svg/);
 });
 
-test("Frame, Fit Setup, and Component Setup are independent sources of truth", () => {
+test("workspace bikes keep Geometry, Fit Setup, and Components independent", () => {
+  const setup = createDefaultBikeSetup();
+  const bikeA = createComparisonBike("A", setup);
+  const bikeB = createComparisonBike("B", setup);
+  const changedBikeB = updateBikeGeometry(bikeB, { stack: bikeB.geometry.stack + 20, reach: bikeB.geometry.reach + 8 });
+
+  assert.deepEqual(ACTIVE_BIKES, ["a", "b"]);
+  assert.equal(bikeA.category, "endurance");
+  assert.equal(bikeB.category, "endurance");
+  assert.notStrictEqual(bikeA.geometry, bikeB.geometry);
+  assert.notStrictEqual(bikeA.fitSetup, bikeB.fitSetup);
+  assert.notStrictEqual(bikeA.componentSetup, bikeB.componentSetup);
+  assert.equal(changedBikeB.geometry.stack, bikeB.geometry.stack + 20);
+  assert.equal(changedBikeB.geometry.reach, bikeB.geometry.reach + 8);
+  assert.equal(bikeA.geometry.stack, bikeB.geometry.stack);
+  assert.equal(bikeA.geometry.reach, bikeB.geometry.reach);
+  assert.equal(buildBikeGeometry(changedBikeB.geometry, toGeometryFit(changedBikeB.fitSetup)).frame.headTop.y, changedBikeB.geometry.stack);
+  assert.equal(getRenderableComponentSetup(bikeA).frameColor, bikeA.frameColor);
+  assert.equal(getRenderableComponentSetup(bikeB).forkColor, bikeB.forkColor);
+
   assert.match(appSource, /const \[initialSetup\] = useState\(\(\) => readPersistedBikeSetup\(\)\)/);
-  assert.match(appSource, /const \[frameState, setFrameState\] = useState\(\{/);
-  assert.match(appSource, /bikeId: trekDomane\.id,[\s\S]*size: trekDomane\.visualBaseSize/);
-  assert.match(appSource, /const \[fitSetup, setFitSetup\] = useState\(\(\) => \(\{ \.\.\.initialSetup\.fitSetup \}\)\)/);
-  assert.match(appSource, /const \[componentSetup, setComponentSetup\] = useState\(\(\) => \(\{ \.\.\.initialSetup\.componentSetup \}\)\)/);
-  assert.match(appSource, /const sizeData = getTrekDomaneSize\(frameState\.size\)/);
-  assert.match(appSource, /const setFrameSize = \(size\) => setFrameState/);
-  assert.match(appSource, /const updateFitSetup = \(key, value\) => \{[\s\S]*shouldPersistSetup\.current = true;[\s\S]*setFitSetup/);
-  assert.match(appSource, /const updateComponentSetup = \(key, value\) => \{[\s\S]*shouldPersistSetup\.current = true;[\s\S]*setComponentSetup/);
-  assert.match(appSource, /if \(!shouldPersistSetup\.current\) return;[\s\S]*persistBikeSetup\(\{ fitSetup, componentSetup \}\)/);
-  assert.match(appSource, /<BikeVisualizer[\s\S]*bike=\{bike\}[\s\S]*fit=\{fit\}[\s\S]*componentSetup=\{resolvedComponentSetup\}[\s\S]*\/>/);
-  assert.match(appSource, /if \(key === "frontWheelId"\) return updateWheelSelection\(current, "front", value\)/);
-  assert.match(appSource, /if \(key === "rearWheelId"\) return updateWheelSelection\(current, "rear", value\)/);
+  assert.match(appSource, /const \[bikes, setBikes\] = useState\(\[\]\)/);
+  assert.match(appSource, /const \[activeBikeIndex, setActiveBikeIndex\] = useState\(null\)/);
+  assert.match(appSource, /const \[compareEnabled, setCompareEnabled\] = useState\(false\)/);
+  assert.match(appSource, /persistBikeSetup\(getPersistableBikeSetup\(bikes\[0\]\)\)/);
+  assert.match(appSource, /<BikeVisualizer[\s\S]*bikes=\{bikes\}[\s\S]*activeBikeIndex=\{isGeometryImportActive \? null : activeBikeIndex\}[\s\S]*stagePreviewBike=\{isGeometryImportActive \? importPreviewBike : null\}[\s\S]*frameOnly=\{isGeometryImportActive\}[\s\S]*compareEnabled=\{compareEnabled\}/);
+  assert.doesNotMatch(appSource + bikeVisualizerSource, /viewMode|compareFocus/);
+  assert.match(dualBikeControlsSource, /role="group" aria-label="当前车型"/);
+  assert.match(dualBikeControlsSource, /type="checkbox"[\s\S]*checked=\{compareEnabled\}/);
+  assert.match(dualBikeControlsSource, /className="dual-bike-card__metrics"[\s\S]*Stack[\s\S]*bike\.geometry\.stack[\s\S]*Reach[\s\S]*bike\.geometry\.reach/);
+  assert.match(dualBikeControlsSource, /import \{ DotsThree, Info, Plus, Stack as Layers \} from "@phosphor-icons\/react"/);
+  assert.match(dualBikeControlsSource, /aria-label="叠层对比"/);
+  assert.match(dualBikeControlsSource, /<Layers className="compare-card__icon"/);
+  assert.match(dualBikeControlsSource, /<span className="compare-card__label">叠层对比<\/span>/);
+  assert.match(dualBikeControlsSource, /<span className="compare-card__switch" aria-hidden="true" \/>/);
+  assert.doesNotMatch(dualBikeControlsSource, /CheckSquare|Square|叠层车型对比/);
+  assert.match(stylesSource, /\.compare-card\s*\{[^}]*box-sizing:\s*border-box;[^}]*flex:\s*0 0 148px;[^}]*min-width:\s*0;[^}]*align-self:\s*flex-start;[^}]*height:\s*40px;[^}]*margin-left:\s*10px;[^}]*padding:\s*0 10px;[^}]*border:\s*0;[^}]*border-radius:\s*var\(--radius-sm\);[^}]*background:\s*var\(--card-glass-bg\);[^}]*box-shadow:\s*var\(--card-glass-shadow\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*display:\s*flex;[^}]*align-items:\s*center;[^}]*gap:\s*6px/);
+  assert.match(stylesSource, /\.compare-card__switch\s*\{[^}]*width:\s*40px;[^}]*height:\s*22px;[^}]*padding:\s*2px;[^}]*background:\s*#303840/);
+  assert.match(stylesSource, /\.compare-card\.is-checked\s*\{[^}]*background:\s*var\(--card-glass-bg\);[^}]*color:\s*var\(--ink\)/);
+  assert.match(stylesSource, /\.compare-card\.is-checked \.compare-card__switch\s*\{[^}]*background:\s*var\(--selected-bg\)/);
+  assert.doesNotMatch(dualBikeControlsSource, /主视角|B 测试|重置|dual-bike-tab|segmented/);
+  assert.match(appSource, /if \(key === "frontWheelId"\) nextComponentSetup = updateWheelSelection\(current\.componentSetup, "front", value\)/);
+  assert.match(appSource, /else if \(key === "rearWheelId"\) nextComponentSetup = updateWheelSelection\(current\.componentSetup, "rear", value\)/);
   assert.match(setupPanelSource, /stateKey = side === "front" \? "frontWheelId" : "rearWheelId"/);
-  assert.doesNotMatch(appSource, /setFitSetup\([^\n]*frameState|setComponentSetup\([^\n]*frameState/);
-  assert.doesNotMatch(appSource, /setFrameState\([^\n]*(fitSetup|componentSetup)/);
+  assert.doesNotMatch(appSource, /const \[(?:frameState|fitSetup|componentSetup),/);
+
+  assert.equal(MAX_BIKES, 2);
+  const oneBike = addWorkspaceBike([], bikeA);
+  const twoBikes = addWorkspaceBike(oneBike, bikeB);
+  assert.deepEqual(addWorkspaceBike(twoBikes, createComparisonBike("C", setup)), twoBikes);
+  assert.equal(replaceWorkspaceBike(twoBikes, 1, changedBikeB)[0], bikeA);
+  assert.equal(replaceWorkspaceBike(twoBikes, 1, changedBikeB)[1], changedBikeB);
+  assert.deepEqual(deleteWorkspaceBike(twoBikes, 0), [bikeB]);
+});
+
+test("zero-bike Welcome Gate overlays the real demo workspace", () => {
+  assert.equal(WELCOME_COMPLETED_STORAGE_KEY, "bikeGeometryLabWelcomeCompleted");
+  assert.match(appSource, /const showWelcomeGate = bikes\.length === 0 && geometryImportStatus === "ready"/);
+  assert.match(appSource, /const \[geometryImportStatus, setGeometryImportStatus\] = useState\("ready"\)/);
+  assert.match(appSource, /<main[\s\S]*className=\{`workspace[\s\S]*inert=\{showWelcomeGate \? true : undefined\}/);
+  assert.match(appSource, /\{showWelcomeGate && <WelcomeGate onUsePreset=\{useWelcomePreset\} onSelectImage=\{selectWelcomeImage\} \/>\}/);
+  assert.match(appSource, /const \[demoBike\] = useState\(\(\) => createComparisonBike\("demo-preview", initialSetup\)\)/);
+  assert.match(appSource, /const useWelcomePreset = \(\) => \{[\s\S]*setBikes\(\[bike\]\);[\s\S]*setActiveBikeIndex\(0\)/);
+  assert.match(appSource, /const selectWelcomeImage = \(file\) => \{[\s\S]*const operation = \{ type: "add", targetIndex: null \};[\s\S]*selectGeometryImage\(file, operation\)/);
+  assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
+
+  assert.match(welcomeGateSource, /先选一辆车，开始你的几何实验/);
+  assert.match(welcomeGateSource, /使用预设车型体验[\s\S]*TREK Domane/);
+  assert.match(welcomeGateSource, /上传官网几何图[\s\S]*官方车架几何图/);
+  assert.match(welcomeGateSource, /\.png,\.jpg,\.jpeg,image\/png,image\/jpeg/);
+  assert.match(welcomeGateSource, /const \[file\] = Array\.from\(event\.target\.files \?\? \[\]\);[\s\S]*if \(file\) onSelectImage\(file\)/);
+  assert.match(stylesSource, /\.welcome-gate\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*background:\s*rgba\(0,0,0,\.76\);[^}]*backdrop-filter:\s*blur\(3px\)/s);
+  assert.match(stylesSource, /\.welcome-gate__choices\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s);
+  assert.match(stylesSource, /\.welcome-choice--primary\s*\{[^}]*background:\s*var\(--selected-bg\)/s);
+  assert.match(stylesSource, /\.welcome-choice--secondary\s*\{[^}]*background:\s*rgba\(20,22,26,\.90\)/s);
+  assert.doesNotMatch(stylesSource.match(/\.welcome-gate__content\s*\{[^}]*\}/s)?.[0] ?? "", /background|border|box-shadow/);
+  assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
+});
+
+test("geometry import auto-analyzes one editable multi-size draft through the existing Renderer path", () => {
+  assert.deepEqual(GEOMETRY_IMPORT_STATUSES, ["analyzing", "review", "ready", "error"]);
+  assert.deepEqual(GEOMETRY_IMPORT_FIELDS.map(({ key }) => key), [
+    "stack", "reach", "effectiveTopTube", "seatTubeLength", "seatTubeAngle",
+    "headTubeLength", "headTubeAngle", "chainstay", "wheelbase", "bbDrop", "forkOffset",
+  ]);
+
+  const draft = createMockGeometryImportDraft();
+  const secondDraft = createMockGeometryImportDraft();
+  assert.deepEqual(Object.keys(draft.sizes), ["49", "52", "54", "56"]);
+  assert.equal(draft.selectedSize, "54");
+  assert.equal(draft.category, "endurance");
+  assert.equal(draft.brand, "");
+  assert.equal(draft.model, "");
+  assert.notStrictEqual(draft.sizes[54], secondDraft.sizes[54]);
+
+  const edited = updateGeometryImportDraftField(draft, "54", "stack", "582");
+  assert.equal(edited.sizes[54].stack, 582);
+  assert.equal(draft.sizes[54].stack, 575);
+  const identified = { ...edited, brand: "Quick", model: "Zeitpro" };
+  assert.equal(validateGeometryImportDraft(identified).isValid, true);
+  assert.equal(validateGeometryImportDraft({ ...identified, model: "" }).isValid, true);
+  const invalid = updateGeometryImportDraftField(identified, "49", "headTubeAngle", "92");
+  assert.equal(validateGeometryImportDraft(invalid).firstInvalidSize, "49");
+  assert.equal(validateGeometryImportDraft({ ...invalid, brand: "" }).firstErrorKey, "brand");
+  assert.equal(validateGeometryImportDraft({ ...invalid, brand: "" }).firstInvalidSize, null);
+  assert.equal(validateGeometryImportDraft(invalid).firstErrorKey, "sizes.49.headTubeAngle");
+  const missingOptional = updateGeometryImportDraftField(identified, "54", "forkOffset", "");
+  assert.equal(validateGeometryImportDraft(missingOptional).isValid, true);
+
+  const sizeData = importGeometryToSizeData("54", missingOptional.sizes[54]);
+  assert.equal(sizeData.stackMm, 582);
+  assert.equal(sizeData.reachMm, 374);
+  assert.equal(sizeData.forkOffsetMm, null);
+  assert.equal(sizeData.trailMm, null);
+  assert.equal(sizeData.standoverMm, null);
+
+  const originalBike = createComparisonBike("A", createDefaultBikeSetup());
+  const importedBike = createBikeFromGeometryImport(originalBike, missingOptional);
+  assert.equal(importedBike.brand, "Quick");
+  assert.equal(importedBike.model, "Zeitpro");
+  assert.equal(importedBike.category, "endurance");
+  assert.equal(importedBike.isPreset, false);
+  assert.deepEqual(importedBike.sizes, ["49", "52", "54", "56"]);
+  assert.equal(importedBike.geometry.stack, 582);
+  assert.deepEqual(importedBike.fitSetup, originalBike.fitSetup);
+  assert.deepEqual(importedBike.componentSetup, originalBike.componentSetup);
+  assert.equal(updateBikeSize(importedBike, "49").geometry.stack, 540);
+  const supplemented = addGeometryImportDraftSize(identified, "58");
+  assert.equal(supplemented.selectedSize, "58");
+  assert.equal(supplemented.sizes[58].stack, null);
+  assert.strictEqual(addGeometryImportDraftSize(supplemented, "58"), supplemented);
+
+  assert.match(appSource, /createBikeFromGeometryImport\(base, geometryImportDraft, geometryImportImage\)/);
+  assert.match(appSource, /createBikeFromGeometryImport\(currentBike, geometryImportDraft, geometryImportImage \?\? currentBike\.geometryImage\)/);
+  assert.match(framePanelSource, /options=\{bike\.sizes\}/);
+  assert.match(framePanelSource, /className="frame-model-section"[\s\S]*model-action-slot/);
+  assert.match(framePanelSource, /tabIndex=\{bike\.source === "upload" \? 0 : -1\}/);
+  assert.match(framePanelSource, /className="size-selector-area"[\s\S]*<SegmentedControl options=\{bike\.sizes\}/);
+  assert.doesNotMatch(appSource, /<FrameGeometryPanel[^>]*key=\{/);
+  assert.match(stylesSource, /\.frame-panel \.section-title\s*\{[^}]*min-height:\s*28px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+  assert.match(stylesSource, /\.model-action-slot\s*\{[^}]*width:\s*96px;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none/);
+  assert.match(stylesSource, /\.model-card\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 64px/);
+  assert.match(stylesSource, /\.model-card strong\s*\{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap/);
+  assert.match(stylesSource, /\.size-selector-area \.segmented\s*\{[^}]*grid-template-columns:\s*repeat\(7, 40px\)/);
+  assert.match(stylesSource, /\.size-selector-area \.segmented button\s*\{[^}]*width:\s*40px;[^}]*height:\s*40px;[^}]*font-variant-numeric:\s*tabular-nums/);
+  assert.match(stylesSource, /\.geometry-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(stylesSource, /\.geometry-detail-list > div\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 100px/);
+  assert.match(stylesSource, /\.geometry-detail-list dd\s*\{[^}]*width:\s*100px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 24px/);
+  assert.doesNotMatch(geometryImportFlowSource, /图片已选择|分析几何数据/);
+  assert.match(geometryImportFlowSource, /AI 正在初步提取几何数据…/);
+  assert.match(geometryImportFlowSource, /AI 初步提取结果，请逐项核对/);
+  assert.match(geometryImportFlowSource, /补充尺码/);
+  assert.match(geometryImportFlowSource, /确认生成车架/);
+  assert.match(geometryImportFlowSource, /geometry-import__review-buttons[\s\S]*>取消<[\s\S]*确认生成车架/);
+  assert.match(geometryImportFlowSource, /data-validation-key="brand"[\s\S]*aria-describedby=\{errors\.brand \? "geometry-import-brand-error"/);
+  assert.match(geometryImportFlowSource, /data-validation-key=\{errorKey\}[\s\S]*aria-describedby=\{error \? errorId/);
+  assert.match(geometryImportFlowSource, /scrollContainer\.scrollTo\(\{[\s\S]*behavior: "smooth"/);
+  assert.match(geometryImportFlowSource, /target\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(geometryImportFlowSource, /message: `还有 \$\{validation\?\.errorCount \?\? 1\} 项信息需要修正`/);
+  assert.match(stylesSource, /input\[aria-invalid="true"\]:focus\s*\{[^}]*status-error/);
+  assert.match(bikeVisualizerSource, /showContactPoints=\{!frameOnly\}[\s\S]*frameOnly=\{frameOnly\}/);
+  assert.match(enduranceTemplateSource, /\{!frameOnly && <>[\s\S]*renderLayer="non-drive-crank"[\s\S]*data-render-layer="cockpit"[\s\S]*<TemplateAsset asset=\{forkAsset\}/);
+  assert.match(dualBikeControlsSource, /className="add-bike-card"[\s\S]*inputRef\.current\?\.click/);
+  assert.match(appSource, /selectGeometryImage\(file, operation\)/);
+  assert.match(appSource, /const GEOMETRY_PREVIEW_COLOR = "#E5E7EB"/);
+  assert.match(appSource, /createBikeFromGeometryImport\(\{ \.\.\.workspaceBike, id: "geometry-import-preview" \}, geometryImportDraft, geometryImportImage\)/);
+  assert.match(appSource, /frameColor: GEOMETRY_PREVIEW_COLOR,[\s\S]*forkColor: GEOMETRY_PREVIEW_COLOR/);
+  assert.match(appSource, /activeBikeIndex=\{isGeometryImportActive \? null : activeBikeIndex\}/);
+  assert.match(appSource, /isStageFullscreen=\{isStageFullscreen \|\| isGeometryImportActive\}/);
+  assert.match(bikeVisualizerSource, /geometryImportMode \? \([\s\S]*Geometry Preview[\s\S]*<DualBikeControls/);
+  assert.match(bikeVisualizerSource, /\{!geometryImportMode && <g[\s\S]*className="bike-reflection"/);
+  assert.match(bikeVisualizerSource, /GeometryPreviewReference point=\{data\.frame\.bb\} label="BB"[\s\S]*label="Rear Axle"[\s\S]*label="Front Axle"/);
+  assert.match(bikeVisualizerSource, /!geometryImportMode && <Switch label="停止动画"/);
+  assert.match(stylesSource, /\.workspace\.workspace--geometry-import\s*\{[^}]*grid-template-columns:\s*360px minmax\(0, 1fr\) 0;/s);
+  assert.match(geometryImageAnalyzerSource, /productionGeometryParserClient/);
+  assert.match(geometryImageAnalyzerSource, /parserClient\.parse\(imageFile/);
+  assert.doesNotMatch(geometryImageAnalyzerSource, /createMockGeometryImportDraft|mockGeometryImport/);
+  assert.match(geometryImportFlowSource, /AI 已提取 \$\{detectedSizeCount\} 个尺码，请核对数据后生成车架/);
+  assert.match(geometryImportFlowSource, /检测到 \$\{detectedSizeCount\} 个尺码，其中 \$\{confirmationCount\} 项数据需要确认/);
+  assert.match(geometryImportFlowSource, /parserWarnings\.map/);
+});
+
+test("STR profiles are derived per bike and keep classification boundaries exact", () => {
+  assert.equal(getSTRProfile(134, 100).label, "竞技几何");
+  assert.equal(getSTRProfile(135, 100).label, "综合型几何");
+  assert.equal(getSTRProfile(145, 100).label, "综合型几何");
+  assert.equal(getSTRProfile(146, 100).label, "舒适耐力几何");
+  assert.equal(getSTRProfile(575, 374).value.toFixed(2), "1.54");
+  assert.equal(getSTRProfile(0, 374), null);
+  assert.equal(getSTRProfile(575, 0), null);
+
+  const setup = createDefaultBikeSetup();
+  const bikeA = createComparisonBike("A", setup);
+  const bikeB = updateBikeGeometry(createComparisonBike("B", setup), { stack: 540, reach: 400 });
+  assert.equal(getSTRProfile(bikeA.geometry.stack, bikeA.geometry.reach).label, "舒适耐力几何");
+  assert.equal(getSTRProfile(bikeB.geometry.stack, bikeB.geometry.reach).label, "综合型几何");
+
+  assert.match(dualBikeControlsSource, /getSTRProfile\(bike\.geometry\.stack, bike\.geometry\.reach\)/);
+  assert.match(dualBikeControlsSource, /strProfile\.value\.toFixed\(2\)/);
+  assert.match(dualBikeControlsSource, /className="str-info__trigger"[\s\S]*aria-describedby/);
+  assert.match(dualBikeControlsSource, /className="str-tooltip" role="tooltip"/);
+  assert.match(stylesSource, /\.dual-bike-card\s*\{[^}]*border:\s*0;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*box-shadow:\s*var\(--card-glass-shadow\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
+  assert.match(stylesSource, /\.dual-bike-card\.is-selected\s*\{[^}]*border:\s*1px solid rgba\(22,119,255,\.62\);[^}]*background:\s*rgba\(22,119,255,\.28\);/s);
+  assert.match(stylesSource, /\.dual-bike-card__meta\s*\{[^}]*z-index:\s*3/);
+  assert.match(stylesSource, /\.str-info__trigger\s*\{[^}]*cursor:\s*pointer/);
+  assert.match(stylesSource, /\.dual-bike-card:has\(\.str-info:hover\),[\s\S]*z-index:\s*20/);
+  assert.match(stylesSource, /\.str-info:hover \.str-tooltip,[\s\S]*\.str-info:focus-within \.str-tooltip/);
 });
 
 test("Fit Setup and Crank Visual remain independent across the requested scenarios", () => {
@@ -788,7 +1023,7 @@ test("stage fullscreen replaces local zoom controls and preserves the mounted wo
   assert.match(stylesSource, /\.workspace\.workspace--stage-fullscreen\s*\{[^}]*grid-template-columns:\s*0 minmax\(0, 1fr\) 0/);
   assert.match(stylesSource, /\.workspace--stage-fullscreen \.frame-panel\s*\{[^}]*translateX\(-100%\)/);
   assert.match(stylesSource, /\.workspace--stage-fullscreen \.setup-panel\s*\{[^}]*translateX\(100%\)/);
-  assert.match(stylesSource, /\.workspace--stage-fullscreen \.canvas-tools\s*\{[^}]*left:\s*50%/);
+  assert.match(stylesSource, /\.workspace--stage-fullscreen \.canvas-tools\s*\{[^}]*right:\s*24px/);
   assert.match(stylesSource, /--stage-card-duration:\s*300ms/);
   assert.match(stylesSource, /--stage-card-stagger:\s*70ms/);
   assert.match(stylesSource, /--stage-sidebar-duration:\s*520ms/);
@@ -803,6 +1038,27 @@ test("stage fullscreen replaces local zoom controls and preserves the mounted wo
   assert.match(stylesSource, /translateX\(20px\) scale\(\.985\)/);
   assert.doesNotMatch(appSource, /setTimeout|setInterval/);
   assert.match(stylesSource, /prefers-reduced-motion:[^)]*reduce[\s\S]*transition-duration:\s*\.01ms !important/);
+  assert.match(bikeVisualizerSource, /<FullscreenGeometrySummary[\s\S]*bikes=\{bikes\}[\s\S]*activeBikeIndex=\{activeBikeIndex\}[\s\S]*compareEnabled=\{compareEnabled\}[\s\S]*visible=\{isStageFullscreen\}/);
+  assert.match(fullscreenGeometrySummarySource, /bikes\.length === 2 && compareEnabled/);
+  assert.doesNotMatch(fullscreenGeometrySummarySource, /getSTRProfile|STR \{|fullscreen-geometry-summary__identity/);
+  assert.match(fullscreenGeometrySummarySource, /const displayedBikes = isComparison[\s\S]*bikes\.map\(\(bike, bikeIndex\) => \(\{ bike, bikeIndex \}\)\)[\s\S]*bike: bikes\[safeActiveIndex\]/);
+  assert.match(fullscreenGeometrySummarySource, /fullscreen-geometry-summary__data-grid[\s\S]*<GeometryDataSection title="几何摘要"[\s\S]*<GeometryDataSection title="几何详情"/);
+  assert.match(fullscreenGeometrySummarySource, /fullscreen-geometry-summary__metric-row[\s\S]*<dt>\{label\}<\/dt>[\s\S]*displayedBikes\.map/);
+  assert.doesNotMatch(fullscreenGeometrySummarySource, /GeometryComparison|SingleGeometrySummary|ComparisonLabelGroup|ComparisonValueGroup|getComparisonSlotLabel|column-head/);
+  for (const label of ["几何摘要", "几何详情", "Stack", "Reach", "头管长度", "轴距", "座管长度", "座管角", "头管角", "有效上管", "五通下沉", "后下叉长度", "前叉偏移", "拖曳距"]) {
+    assert.ok(fullscreenGeometrySummarySource.includes(label));
+  }
+  assert.doesNotMatch(fullscreenGeometrySummarySource, /standoverMm|跨高/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary\s*\{[^}]*left:\s*24px;[^}]*bottom:\s*24px;[^}]*z-index:\s*5;[^}]*width:\s*300px;[^}]*border:\s*0;[^}]*border-radius:\s*18px;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;[^}]*backdrop-filter:\s*none;[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(8px\);[^}]*transition:\s*opacity 240ms/s);
+  assert.doesNotMatch(stylesSource, /fullscreen-geometry-summary__(?:comparison-grid|column-head|label-column|value-column)/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__data-grid\s*\{[^}]*row-gap:\s*16px/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__section h3\s*\{[^}]*color:\s*rgba\(255,255,255,\.88\);[^}]*font-size:\s*var\(--font-size-xs\);[^}]*font-weight:\s*700/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__metric-row\s*\{[^}]*grid-template-columns:\s*120px repeat\(1, 80px\);[^}]*justify-content:\s*space-between/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__data-grid\.is-comparison \.fullscreen-geometry-summary__metric-row\s*\{[^}]*grid-template-columns:\s*120px repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__metric-row dt\s*\{[^}]*color:\s*rgba\(255,255,255,\.58\);[^}]*font-size:\s*var\(--font-size-xs\)/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__metric-value strong\s*\{[^}]*color:\s*#fff;[^}]*font-size:\s*var\(--font-size-xs\);[^}]*font-weight:\s*700/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__metric-value\.is-secondary strong\s*\{[^}]*color:\s*rgba\(255,255,255,\.72\);[^}]*font-weight:\s*600/);
+  assert.match(stylesSource, /\.fullscreen-geometry-summary__metric-value\.is-missing strong\s*\{[^}]*color:\s*rgba\(255,255,255,\.38\)/);
 });
 
 test("the workspace uses the supplied official Prism without site-side lighting effects", () => {
@@ -872,7 +1128,7 @@ test("Bike Stage aligns both 700C wheel contact points to one responsive Prism g
   assert.match(bikeVisualizerSource, /new ResizeObserver\(updateStageSize\)/);
   assert.match(bikeVisualizerSource, /const bikeGroundY = rearAxle\.y \+ wheelOuterRadius/);
   assert.match(bikeVisualizerSource, /<g className="stage-content" transform=\{`translate\(0 \$\{groundAlignment\.stageTranslateY\}\)`\}>/);
-  assert.match(bikeVisualizerSource, /className="stage-content"[\s\S]*<BikeLayer[\s\S]*className="dimensions"[\s\S]*className="bb-origin"/);
+  assert.match(bikeVisualizerSource, /className="stage-content"[\s\S]*<BikeRenderer[\s\S]*className="dimensions"[\s\S]*className="bb-origin"/);
   assert.doesNotMatch(bikeVisualizerSource, /getBBox\(|FrontWheel translateY|RearWheel translateY/);
   assert.match(stylesSource, /\.bike-canvas\s*\{[^}]*overflow:\s*visible;/);
 });
@@ -885,13 +1141,16 @@ test("Bike reflection reuses the primary animated bike around the responsive gro
   assert.match(bikeVisualizerSource, /const REFLECTION_OPACITY = 0\.2/);
   assert.match(bikeVisualizerSource, /const REFLECTION_GAP_PX = 2/);
   assert.match(bikeVisualizerSource, /const reflectionGap = REFLECTION_GAP_PX \/ groundAlignment\.stageScale/);
-  assert.match(bikeVisualizerSource, /const BIKE_VISUAL_SOURCE_ID = "bike-visual-source"/);
-  assert.match(bikeVisualizerSource, /<g id=\{BIKE_VISUAL_SOURCE_ID\} data-bike-visual-source="primary">[\s\S]*<RoadBikeVisual/);
+  assert.match(bikeVisualizerSource, /const getBikeVisualSourceId = \(bikeId\) => `bike-visual-source-\$\{bikeId\}`/);
+  assert.match(bikeVisualizerSource, /<g id=\{sourceId\} data-bike-visual-source=\{bike\.id\}>[\s\S]*<RoadBikeVisual/);
   assert.match(bikeVisualizerSource, /`translate\(0 \$\{reflectionGap\}\)`[\s\S]*`translate\(0 \$\{groundAlignment\.stageGroundY\}\)`[\s\S]*"scale\(1 -1\)"[\s\S]*`translate\(0 \$\{-groundAlignment\.stageGroundY\}\)`/);
   assert.match(bikeVisualizerSource, /data-reflection-gap-px=\{REFLECTION_GAP_PX\}/);
-  assert.match(bikeVisualizerSource, /className="bike-reflection"[\s\S]*opacity=\{REFLECTION_OPACITY\}[\s\S]*data-reflection-source="shared-bike-visual-use"[\s\S]*data-reflection-transform="scaleY\(-1\)"[\s\S]*<use[\s\S]*href=\{`#\$\{BIKE_VISUAL_SOURCE_ID\}`\}[\s\S]*data-reflection-instance="shared-animation-timeline"/);
+  assert.match(bikeVisualizerSource, /className="bike-reflection"[\s\S]*opacity=\{REFLECTION_OPACITY\}[\s\S]*data-reflection-source="shared-bike-visual-use"[\s\S]*data-reflection-transform="scaleY\(-1\)"[\s\S]*<use[\s\S]*href=\{`#\$\{primarySourceId\}`\}[\s\S]*data-reflection-instance="shared-animation-timeline"/);
   assert.equal(bikeVisualizerSource.match(/<RoadBikeVisual\b/g)?.length, 1);
-  assert.doesNotMatch(bikeVisualizerSource, /function BikeVisualOnly|<BikeVisualOnly/);
+  assert.match(bikeVisualizerSource, /const primaryModel = renderModelList\[safeActiveIndex\]/);
+  assert.match(bikeVisualizerSource, /const secondaryModel = renderModelList\[safeActiveIndex === 0 \? 1 : 0\]/);
+  assert.match(bikeVisualizerSource, /const renderModels = isComparisonVisible \? \[secondaryModel, primaryModel\] : \[primaryModel\]/);
+  assert.match(bikeVisualizerSource, /opacity=\{isPrimary \? 1 : 0\.28\}/);
   assert.match(stylesSource, /\.bike-reflection\s*\{[^}]*pointer-events:\s*none;/);
   assert.doesNotMatch(bikeVisualizerSource, /REFLECTION_(?:BLUR|SATURATION|BRIGHTNESS|HEIGHT|MAX)|reflectionCanvasRef|bike-reflection-canvas/);
   assert.doesNotMatch(stylesSource, /\.bike-reflection[^}]*?(?:filter|mask|gradient|blur|brightness|saturate)/s);
@@ -922,6 +1181,9 @@ test("bicycle resources render without SVG or CSS shadow effects", () => {
 
 test("production frame and fork expose colorable bodies while axle rods stay fixed black at 30%", () => {
   assert.match(frameBottomBracketSource, /fill="black"/);
+  assert.match(frameBottomBracketSource, /width="113\.192"[^>]*viewBox="0 0 113\.192 88\.8519"/);
+  assert.match(frameBottomBracketSource, /<path id="Subtract"[^>]*C83\.911 34\.2797 120\.386 -9\.29462[^>]*M55\.103 55\.165C47\.9234/);
+  assert.doesNotMatch(frameBottomBracketSource, /id="&#228;&#186;&#148;&#233;&#128;&#154;_2"/);
   assert.match(forkSource, /<path[^>]*fill="black"/);
   assert.match(forkSource, /<circle[^>]*fill="#000000"[^>]*fill-opacity="0\.3"/);
   assert.match(frameChainstaySource, /<circle[^>]*fill="#000000"[^>]*fill-opacity="0\.3"/);
@@ -965,16 +1227,16 @@ test("frame, fork, and bar tape colors are preset-driven, independent, and persi
   assert.equal(resolved.forkColor, "#899A84");
   assert.equal(resolved.barTapeColor, "#6B3F46");
 
-  const modelCardIndex = framePanelSource.indexOf('<PanelSection title="车型">');
+  const modelCardIndex = framePanelSource.indexOf('title="车型"');
   const sizeCardIndex = framePanelSource.indexOf('<PanelSection title="尺码"');
   const appearanceCardIndex = framePanelSource.indexOf('<PanelSection title="车架外观">');
   const summaryCardIndex = framePanelSource.indexOf('<PanelSection title="几何摘要"');
   const detailsCardIndex = framePanelSource.indexOf('title="几何详情"');
   assert.ok(modelCardIndex < sizeCardIndex && sizeCardIndex < appearanceCardIndex && appearanceCardIndex < summaryCardIndex && summaryCardIndex < detailsCardIndex);
   assert.doesNotMatch(framePanelSource, /appearanceTarget|frameAppearanceTargets|车架外观着色目标/);
-  assert.match(framePanelSource, /label="车架颜色"[\s\S]*value=\{componentSetup\.frameColor\}[\s\S]*updateComponentSetup\("frameColor", value\)/);
-  assert.match(framePanelSource, /label="前叉颜色"[\s\S]*value=\{componentSetup\.forkColor\}[\s\S]*updateComponentSetup\("forkColor", value\)/);
-  assert.match(appSource, /<FrameGeometryPanel[\s\S]*componentSetup=\{componentSetup\}[\s\S]*updateComponentSetup=\{updateComponentSetup\}/);
+  assert.match(framePanelSource, /label="车架颜色"[\s\S]*value=\{bike\.frameColor\}[\s\S]*updateComponentSetup\("frameColor", value\)/);
+  assert.match(framePanelSource, /label="前叉颜色"[\s\S]*value=\{bike\.forkColor\}[\s\S]*updateComponentSetup\("forkColor", value\)/);
+  assert.match(appSource, /<FrameGeometryPanel[\s\S]*bike=\{workspaceBike\}[\s\S]*updateComponentSetup=\{updateComponentSetup\}/);
 
   assert.match(setupPanelSource, /<PanelSection title="颜色">/);
   assert.match(setupPanelSource, /<ColorPalette label="把带颜色" value=\{componentSetup\.barTapeColor\}/);
@@ -1103,7 +1365,8 @@ test("sidebar and visualizer header shells stay fully transparent without removi
   assert.match(stylesSource, /\.side-panel::before,[\s\S]*?\.visualizer__header::after\s*\{[^}]*display:\s*none;[^}]*content:\s*none;/);
   assert.match(stylesSource, /\.control-section\s*\{[^}]*background:\s*var\(--side-card-glass-bg\);/);
   assert.match(stylesSource, /\.setup-tabs\s*\{[^}]*background:\s*var\(--side-card-glass-bg\);/);
-  assert.match(bikeVisualizerSource, /<div className="visualizer__header">[\s\S]*TREK|<div className="visualizer__header">[\s\S]*bike\.brand\.toUpperCase/);
+  assert.match(bikeVisualizerSource, /<div className="visualizer__header">[\s\S]*<DualBikeControls[\s\S]*className="stage-fullscreen-control"/);
+  assert.doesNotMatch(bikeVisualizerSource, /active-bike-metrics|bike-title/);
   assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
 });
 
@@ -1125,7 +1388,7 @@ test("side and floating cards share the neutral-black glass system without color
   }
 
   for (const selector of ["canvas-tools"]) {
-    const rule = new RegExp(`\\.${selector}\\s*\\{[^}]*border:\\s*1px solid var\\(--card-glass-border\\);[^}]*background:\\s*var\\(--card-glass-bg\\);[^}]*box-shadow:\\s*var\\(--card-glass-shadow\\);[^}]*backdrop-filter:\\s*var\\(--card-glass-filter\\);[^}]*-webkit-backdrop-filter:\\s*var\\(--card-glass-filter\\);`, "s");
+    const rule = new RegExp(`\\.${selector}\\s*\\{[^}]*right:\\s*24px;[^}]*border:\\s*0;[^}]*background:\\s*var\\(--card-glass-bg\\);[^}]*box-shadow:\\s*var\\(--card-glass-shadow\\);[^}]*backdrop-filter:\\s*var\\(--card-glass-filter\\);[^}]*-webkit-backdrop-filter:\\s*var\\(--card-glass-filter\\);`, "s");
     assert.match(stylesSource, rule, `${selector} must retain the floating glass background`);
   }
 
@@ -1306,12 +1569,14 @@ test("top and down tube assets preserve Figma connection-completion layers above
   );
 
   assert.equal((topTubeSource.match(/<path /g) ?? []).length, 2);
-  assert.equal((downTubeSource.match(/<path /g) ?? []).length, 3);
+  assert.equal((downTubeSource.match(/<path /g) ?? []).length, 4);
   assert.ok(topTubeSource.indexOf("M394.471 27.5") < topTubeSource.indexOf("M384.886 39.5322"));
   assert.ok(downTubeSource.indexOf("M339.384 47.5") < downTubeSource.indexOf("M307.384 23"));
   assert.ok(downTubeSource.indexOf("M307.384 23") < downTubeSource.indexOf("M328.384 67"));
+  assert.ok(downTubeSource.indexOf("M328.384 67") < downTubeSource.indexOf("M62.3725 318.374"));
+  assert.match(downTubeSource, /id="&#229;&#156;&#134;&#232;&#167;&#146;&#232;&#161;&#165;&#229;&#133;&#168;"/);
   assert.equal((topTubeSource.match(/fill="black"/g) ?? []).length, 2);
-  assert.equal((downTubeSource.match(/fill="black"/g) ?? []).length, 3);
+  assert.equal((downTubeSource.match(/fill="black"/g) ?? []).length, 4);
   assert.doesNotMatch(`${topTubeSource}${downTubeSource}`, /<rect|<filter|border-radius/);
   assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameTopTubeSource, "black", components\.frameColor\)/);
   assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameDownTubeSource, "black", components\.frameColor\)/);
