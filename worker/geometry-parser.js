@@ -1,23 +1,23 @@
-import { GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA } from "../src/services/geometryParserSchema.js";
+import { GEOMETRY_PARSER_RAW_TABLE_SCHEMA } from "../src/services/geometryParserSchema.js";
 import {
   GeometryParserValidationError,
   validateAndNormalizeGeometryParserResponse,
 } from "../src/services/geometryParserValidator.js";
+import { mapRawGeometryTableToParserResponse } from "../src/services/geometryParserRawTableMapper.js";
 import { getGeometryProvider } from "./providers/geometryProviderRegistry.js";
 
 const PARSER_PATH = "/api/geometry/parse";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const PARSER_PROTOCOL_VERSION = "raw-table-v1";
 
 const SYSTEM_PROMPT = `You extract bicycle frame geometry tables from official product images.
 Read the image itself. Do not use the filename, brand assumptions, known-bike memory, presets, or guessed fallback values.
 The image may contain multiple frame-size columns. Find the complete geometry table, determine whether sizes are rows or columns, and identify every size.
 Preserve every official size label exactly as printed and in source order. Never shorten, normalize, convert, or reinterpret a size label.
-Return one sizes[] object per detected size. Every geometry object must contain every schema field. Use null for any cell that is missing, ambiguous, occluded, or not reliably readable.
-Never drop a size because one or more cells are uncertain. Never shift a value into a neighboring size. Never compress parallel arrays.
-Map source labels to the canonical schema by meaning. Distances are millimetres and angles are degrees unless the source explicitly states otherwise.
-fieldColumnCounts should report the number of reliably read non-null cells for each canonical field; the server will independently recompute it.
-Warnings must identify uncertainty without inventing values. Unknown source rows belong in unrecognizedFields.
-Return only one valid JSON Object matching the requested fields.`;
+Return the raw geometry table, not an interpretation into another schema. rawRows must include every detected source row, including rows whose meaning is uncertain or not useful to a bicycle renderer.
+For each raw row, preserve the source label text as printed, record its displayed unit when available, and provide one value per detected size in the exact source column order. Use null only for an unreadable cell; never delete an entire row because its field meaning is uncertain.
+Do not infer a row's meaning from diagram letters such as A, B, C, D, E, F, G, H, I, J, or K. Do not omit rows such as Wheelbase, Fork Offset, Standover, or Chinese-labelled geometry rows merely because they may not exist in a downstream schema.
+Never drop a size because one or more cells are uncertain. Never shift a value into a neighboring size. Return only one valid JSON Object matching the requested raw-table fields.`;
 
 function jsonResponse(body, status, origin, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
@@ -57,6 +57,45 @@ function detectImageMime(bytes, declaredType) {
 
 function errorPayload(code, message, details = []) {
   return { error: { code, message, details } };
+}
+
+function isQwenProvider(env) {
+  return String(env.GEOMETRY_PARSER_PROVIDER ?? "").trim().toLowerCase() === "qwen";
+}
+
+function requireRawGeometryTable(structuredOutput) {
+  const rawRows = structuredOutput?.rawRows;
+  if (!Array.isArray(rawRows) || rawRows.length === 0) {
+    throw new GeometryParserValidationError("模型未返回完整原始几何表结构，请重新识别。", {
+      code: "RAW_TABLE_REQUIRED",
+    });
+  }
+
+  const detectedSizes = structuredOutput?.detectedSizes;
+  if (!Array.isArray(detectedSizes) || detectedSizes.length === 0) {
+    throw new GeometryParserValidationError("模型未返回可对齐的原始尺码列，请重新识别。", {
+      code: "RAW_TABLE_DETECTED_SIZES_REQUIRED",
+    });
+  }
+
+  for (const [rowIndex, row] of rawRows.entries()) {
+    if (!row || typeof row !== "object" || Array.isArray(row)
+      || !String(row.label ?? "").trim() || !Array.isArray(row.values)) {
+      throw new GeometryParserValidationError("模型返回的原始几何表行不完整，请重新识别。", {
+        code: "RAW_TABLE_ROW_INVALID",
+        details: [{ rowIndex }],
+      });
+    }
+    if (row.values.length !== detectedSizes.length) {
+      throw new GeometryParserValidationError(
+        `原始几何表的“${String(row.label).trim()}”包含 ${row.values.length} 个单元格，与 ${detectedSizes.length} 个尺码列不一致，请重新识别。`,
+        {
+          code: "RAW_TABLE_COLUMN_COUNT_MISMATCH",
+          details: [{ rowIndex, label: String(row.label).trim(), valueCount: row.values.length, detectedSizeCount: detectedSizes.length }],
+        },
+      );
+    }
+  }
 }
 
 export function createGeometryParserWorker({
@@ -110,7 +149,7 @@ export function createGeometryParserWorker({
           imageBuffer,
           mimeType,
           prompt: SYSTEM_PROMPT,
-          schema: GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA,
+          schema: GEOMETRY_PARSER_RAW_TABLE_SCHEMA,
         });
       } catch (error) {
         return jsonResponse(
@@ -125,10 +164,15 @@ export function createGeometryParserWorker({
       }
 
       try {
-        const validated = validateAndNormalizeGeometryParserResponse(providerResult?.structuredOutput);
+        if (isQwenProvider(env)) requireRawGeometryTable(providerResult?.structuredOutput);
+        const mappedResponse = mapRawGeometryTableToParserResponse(providerResult?.structuredOutput);
+        const validated = validateAndNormalizeGeometryParserResponse(mappedResponse);
         return jsonResponse({
           ...validated,
-          meta: providerResult?.meta ?? null,
+          meta: {
+            ...(providerResult?.meta && typeof providerResult.meta === "object" ? providerResult.meta : {}),
+            parserProtocolVersion: PARSER_PROTOCOL_VERSION,
+          },
         }, 200, origin);
       } catch (error) {
         const validationError = error instanceof GeometryParserValidationError;

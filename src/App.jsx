@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { updateWheelSelection, updateWheelSelectionLink } from "./config/bikeComponents.js";
 import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersistence.js";
 import { createBikeFromGeometryImport, createComparisonBike, getPersistableBikeSetup, updateBikeSize } from "./state/dualBikeState.js";
-import { addGeometryImportDraftSize, bikeToGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getGeometryImportFieldError, isSupportedGeometryImage, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
+import { addGeometryImportDraftSize, bikeToGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
 import { analyzeGeometryImage } from "./services/geometryImageAnalyzer.js";
 import { FrameGeometryPanel } from "./components/panels/FrameGeometryPanel.jsx";
@@ -13,7 +13,6 @@ import Prism from "./components/visualizer/Prism.jsx";
 import { WelcomeGate } from "./components/import/WelcomeGate.jsx";
 import brandLogo from "./assets/brand/logo_bai.png";
 
-const IMPORT_PREVIEW_FIELDS = ["stack", "reach", "effectiveTopTube", "seatTubeLength", "seatTubeAngle", "headTubeLength", "headTubeAngle", "chainstay", "wheelbase", "bbDrop", "forkOffset"];
 const GEOMETRY_PREVIEW_COLOR = "#E5E7EB";
 
 export function App() {
@@ -39,11 +38,12 @@ export function App() {
   const workspaceBike = selectedBike ?? demoBike;
   const isGeometryImportActive = geometryImportStatus !== "ready";
   const importSelectedGeometry = geometryImportDraft?.sizes?.[geometryImportDraft.selectedSize];
-  const canPreviewImportedGeometry = IMPORT_PREVIEW_FIELDS.every((key) => Number.isFinite(Number(importSelectedGeometry?.[key])) && Number(importSelectedGeometry[key]) > 0);
-  const importPreviewSourceBike = isGeometryImportActive && canPreviewImportedGeometry
+  const geometryImportPreviewIssues = getGeometryImportPreviewIssues(importSelectedGeometry);
+  const draftPreviewValid = isGeometryImportPreviewSafe(importSelectedGeometry);
+  const importPreviewSourceBike = isGeometryImportActive && draftPreviewValid
     ? createBikeFromGeometryImport({ ...workspaceBike, id: "geometry-import-preview" }, geometryImportDraft, geometryImportImage)
-    : { ...workspaceBike, id: "geometry-import-preview" };
-  const importPreviewBike = {
+    : null;
+  const importPreviewBike = importPreviewSourceBike && {
     ...importPreviewSourceBike,
     frameColor: GEOMETRY_PREVIEW_COLOR,
     forkColor: GEOMETRY_PREVIEW_COLOR,
@@ -159,6 +159,13 @@ export function App() {
     });
   };
   const selectGeometryImportSize = (size) => setGeometryImportDraft((current) => ({ ...current, selectedSize: String(size) }));
+  const toggleGeometryImportCandidateSize = (size) => {
+    setGeometryImportDraft((current) => toggleGeometryImportSize(current, size));
+    setGeometryImportErrors((current) => {
+      const prefix = `sizes.${String(size)}.`;
+      return Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(prefix)));
+    });
+  };
   const addGeometryImportSize = (size) => {
     setGeometryImportDraft((current) => addGeometryImportDraftSize(current, size));
     setGeometryImportErrors((current) => ({ ...current, sizes: undefined }));
@@ -167,21 +174,30 @@ export function App() {
     if (!geometryImportDraft) return;
     const size = geometryImportDraft.selectedSize;
     setGeometryImportDraft((current) => {
-      const next = updateGeometryImportDraftField(current, size, key, value);
+      const updatedDraft = updateGeometryImportDraftField(current, size, key, value);
+      const next = {
+        ...updatedDraft,
+        candidateSizes: {
+          ...(updatedDraft.candidateSizes ?? {}),
+          [size]: { ...updatedDraft.sizes[size] },
+        },
+      };
       const field = GEOMETRY_IMPORT_FIELDS.find((candidate) => candidate.key === key);
       const fieldError = getGeometryImportFieldError(field, value === "" ? null : Number(value));
       if (fieldError || !Array.isArray(current.parserWarnings)) return next;
-      const fieldIsComplete = Object.values(next.sizes).every((geometry) => geometry?.[key] != null);
-      const parserWarnings = current.parserWarnings.filter((warning) => {
+      const fieldIsComplete = getSelectedImportSizes(next).every((selectedSize) => next.sizes[selectedSize]?.[key] != null);
+      const allParserWarnings = (current.allParserWarnings ?? current.parserWarnings ?? []).filter((warning) => {
         if (warning.field !== key) return true;
-        if (warning.size === size && warning.code === "CELL_UNRECOGNIZED") return false;
+        if (warning.size === size && ["CELL_UNRECOGNIZED", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)) return false;
         if (fieldIsComplete && ["COLUMN_COUNT_MISMATCH", "REPORTED_COLUMN_COUNT_MISMATCH"].includes(warning.code)) return false;
         return true;
       });
+      const parserWarnings = scopeGeometryImportWarnings(allParserWarnings, getSelectedImportSizes(next));
       return {
         ...next,
+        allParserWarnings,
         parserWarnings,
-        parserConfirmationCount: parserWarnings.filter((warning) => warning.code === "CELL_UNRECOGNIZED" || warning.code === "SIZE_COLUMN_MISSING").length,
+        parserConfirmationCount: parserWarnings.filter((warning) => ["CELL_UNRECOGNIZED", "SIZE_COLUMN_MISSING", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)).length,
       };
     });
     setGeometryImportErrors((current) => {
@@ -285,6 +301,7 @@ export function App() {
             onSelectImage: selectGeometryImage,
             onDraftMetaChange: updateGeometryImportMeta,
             onSelectSize: selectGeometryImportSize,
+            onToggleImportSize: toggleGeometryImportCandidateSize,
             onAddSize: addGeometryImportSize,
             onGeometryFieldChange: updateGeometryImportField,
             onConfirm: confirmGeometryImport,
@@ -302,6 +319,8 @@ export function App() {
             stagePreviewBike={isGeometryImportActive ? importPreviewBike : null}
             frameOnly={isGeometryImportActive}
             geometryImportMode={isGeometryImportActive}
+            geometryImportPreviewReady={draftPreviewValid}
+            geometryImportPreviewIssues={geometryImportPreviewIssues}
             compareEnabled={compareEnabled}
             onActiveBikeChange={setActiveBikeIndex}
             onCompareEnabledChange={setCompareEnabled}

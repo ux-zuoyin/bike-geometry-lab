@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   GEOMETRY_PARSER_FIELD_KEYS,
+  GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
+  GEOMETRY_PARSER_RAW_TABLE_SCHEMA,
   GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA,
 } from "../src/services/geometryParserSchema.js";
 import {
@@ -14,12 +16,22 @@ import {
   analyzeGeometryImage,
   geometryParserResponseToDraft,
 } from "../src/services/geometryImageAnalyzer.js";
+import {
+  isGeometryImportPreviewSafe,
+  resolveGeometryImportPreview,
+} from "../src/state/geometryImportState.js";
 import { createGeometryParserWorker } from "../worker/geometry-parser.js";
+import { mapRawGeometryTableToParserResponse } from "../src/services/geometryParserRawTableMapper.js";
 import {
   createQuickGeometryParserFixture,
   QUICK_GEOMETRY,
   QUICK_SIZES,
 } from "./fixtures/quickGeometryParserResponse.js";
+import {
+  createQuickGeometryParserMisalignedResponse,
+  createQuickGeometryParserPartialResponse,
+} from "./fixtures/quickGeometryParserMisalignedResponse.js";
+import { createQuickGeometryParserRawTableFixture } from "./fixtures/quickGeometryParserRawTableResponse.js";
 import { getGeometryProvider } from "../worker/providers/geometryProviderRegistry.js";
 
 const analyzerSource = readFileSync(new URL("../src/services/geometryImageAnalyzer.js", import.meta.url), "utf8");
@@ -35,7 +47,7 @@ async function createProviderInput(file = createPngFile()) {
     imageBuffer: await file.arrayBuffer(),
     mimeType: "image/png",
     prompt: "Extract every size and return only one valid JSON Object.",
-    schema: GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA,
+    schema: GEOMETRY_PARSER_RAW_TABLE_SCHEMA,
   };
 }
 
@@ -46,12 +58,77 @@ const QWEN_TEST_ENV = Object.freeze({
   DASHSCOPE_COMPATIBLE_BASE_URL: "https://dashscope.example.test/compatible-mode/v1",
 });
 
-test("structured output schema requires complete keyed geometry objects", () => {
+test("raw-table provider schema requires source rows with aligned values", () => {
+  assert.deepEqual(GEOMETRY_PARSER_RAW_TABLE_SCHEMA.required, ["detectedSizeCount", "detectedSizes", "rawRows"]);
+  const rawRowSchema = GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.rawRows.items;
+  assert.deepEqual(rawRowSchema.required, ["label", "unit", "values"]);
+  assert.deepEqual(rawRowSchema.properties.values.items.type, ["number", "null"]);
+
   const geometrySchema = GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA
     .properties.sizes.items.properties.geometry;
   assert.deepEqual(geometrySchema.required, GEOMETRY_PARSER_FIELD_KEYS);
   assert.equal(geometrySchema.additionalProperties, false);
   assert.deepEqual(geometrySchema.properties.stack.type, ["number", "null"]);
+});
+
+test("raw QUICK table preserves Wheelbase and Fork Offset rows before deterministic mapping", () => {
+  const rawTable = createQuickGeometryParserRawTableFixture();
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const result = validateAndNormalizeGeometryParserResponse(mapped);
+  const wheelbaseRow = result.rawRows.find(({ label }) => label === "G 轮轴距");
+  const forkOffsetRow = result.rawRows.find(({ label }) => label === "H 前叉调节量");
+
+  assert.deepEqual(wheelbaseRow.values, [986, 988, 998.5, 999, 1013]);
+  assert.deepEqual(forkOffsetRow.values, [45, 45, 45, 45, 45]);
+  assert.equal(result.sizes.find(({ size }) => size === "430").geometry.wheelbase, 986);
+  assert.equal(result.sizes.find(({ size }) => size === "430").geometry.forkOffset, 45);
+  assert.equal(result.sizes.find(({ size }) => size === "550").geometry.wheelbase, 1013);
+  assert.equal(result.sizes.find(({ size }) => size === "550").geometry.forkOffset, 45);
+  assert.deepEqual(result.unrecognizedFields.find(({ sourceLabel }) => sourceLabel === "跨高"), {
+    sourceLabel: "跨高",
+    reason: "Standover / 跨高不属于当前 Geometry Schema。",
+    unit: "mm",
+    values: [725, 747, 769, 790, 812],
+  });
+});
+
+test("mapper gives Specialized-specific labels precedence and preserves non-schema semantics", () => {
+  const mapped = mapRawGeometryTableToParserResponse({
+    detectedSizeCount: 1,
+    detectedSizes: ["52"],
+    rawRows: [
+      { label: "车架堆高", unit: "mm", values: [555] },
+      { label: "把立堆高", unit: "mm", values: [40] },
+      { label: "车架前伸量", unit: "mm", values: [380] },
+      { label: "把立前伸量", unit: "mm", values: [80] },
+      { label: "立管长度", unit: "mm", values: [470] },
+      { label: "立管角度", unit: "°", values: [73.5] },
+      { label: "上管长度，水平", unit: "mm", values: [535] },
+      { label: "轴距", unit: "mm", values: [997] },
+      { label: "前轴距", unit: "mm", values: [590] },
+      { label: "前叉偏移量", unit: "mm", values: [44] },
+      { label: "中轴下沉", unit: "mm", values: [72] },
+      { label: "拖曳距", unit: "mm", values: [58] },
+      { label: "跨高", unit: "mm", values: [760] },
+    ],
+  });
+  const geometry = mapped.sizes[0].geometry;
+
+  assert.equal(geometry.stack, 555);
+  assert.equal(geometry.reach, 380);
+  assert.equal(geometry.seatTubeLength, 470);
+  assert.equal(geometry.seatTubeAngle, 73.5);
+  assert.equal(geometry.effectiveTopTube, 535);
+  assert.equal(geometry.wheelbase, 997);
+  assert.equal(geometry.forkOffset, 44);
+  assert.equal(geometry.bbDrop, 72);
+  assert.deepEqual(mapped.unrecognizedFields.map(({ sourceLabel, reason }) => ({ sourceLabel, reason })), [
+    { sourceLabel: "把立堆高", reason: "把立堆高不属于车架 Stack，已禁止映射。" },
+    { sourceLabel: "把立前伸量", reason: "把立前伸量不属于车架 Reach，已禁止映射。" },
+    { sourceLabel: "前轴距", reason: "Front Center / 前轴距不属于当前 Geometry Schema，已禁止映射到 Wheelbase。" },
+    { sourceLabel: "拖曳距", reason: "Trail / 拖曳距不属于当前 Geometry Schema。" },
+    { sourceLabel: "跨高", reason: "Standover / 跨高不属于当前 Geometry Schema。" },
+  ]);
 });
 
 test("QUICK fixture preserves all five official size labels and benchmark columns", () => {
@@ -60,6 +137,8 @@ test("QUICK fixture preserves all five official size labels and benchmark column
   assert.equal(result.detectedSizeCount, 5);
   assert.equal(result.confirmationCount, 0);
   assert.deepEqual(result.warnings, []);
+  assert.equal(result.sizes.find(({ size }) => size === "430").geometry.wheelbase, 986);
+  assert.equal(result.sizes.find(({ size }) => size === "430").geometry.forkOffset, 45);
   for (const entry of result.sizes) assert.deepEqual(entry.geometry, QUICK_GEOMETRY[entry.size]);
   for (const field of GEOMETRY_PARSER_FIELD_KEYS) assert.equal(result.fieldColumnCounts[field], 5);
 });
@@ -78,6 +157,62 @@ test("validator recomputes field counts, retains null cells, and never drops a s
   assert.ok(result.warnings.some(({ code, field, size }) => code === "CELL_UNRECOGNIZED" && field === "stack" && size === "550"));
   assert.ok(result.warnings.some(({ code, field }) => code === "COLUMN_COUNT_MISMATCH" && field === "stack"));
   assert.ok(result.warnings.some(({ code, field }) => code === "REPORTED_COLUMN_COUNT_MISMATCH" && field === "stack"));
+});
+
+test("validator flags the real QUICK standover-to-BB-Drop regression without passing 812 into Draft Preview", () => {
+  const result = validateAndNormalizeGeometryParserResponse(createQuickGeometryParserMisalignedResponse());
+  const size550 = result.sizes.find(({ size }) => size === "550");
+  const rangeWarning = result.warnings.find(({ code, field, size }) => (
+    code === "GEOMETRY_VALUE_OUT_OF_RANGE" && field === "bbDrop" && size === "550"
+  ));
+
+  assert.equal(size550.geometry.bbDrop, 812);
+  assert.equal(size550.geometry.forkOffset, 73);
+  assert.deepEqual(rangeWarning, {
+    code: "GEOMETRY_VALUE_OUT_OF_RANGE",
+    field: "bbDrop",
+    size: "550",
+    value: 812,
+    message: "550 尺码的 BB Drop 识别为 812 mm，数值明显异常，请核对。",
+  });
+  assert.equal(result.confirmationCount, 1);
+
+  assert.equal(isGeometryImportPreviewSafe(size550.geometry), true);
+  const preview = resolveGeometryImportPreview(size550.geometry);
+  assert.equal(preview.geometry.bbDrop, 80);
+  assert.equal(preview.geometrySources.bbDrop, "estimated");
+});
+
+test("validator applies every configured geometry plausibility guardrail", () => {
+  for (const [field, range] of Object.entries(GEOMETRY_PARSER_PLAUSIBILITY_RANGES)) {
+    const raw = createQuickGeometryParserFixture();
+    raw.sizes[0].geometry[field] = range.max + 1;
+    const result = validateAndNormalizeGeometryParserResponse(raw);
+    assert.ok(result.warnings.some((item) => (
+      item.code === "GEOMETRY_VALUE_OUT_OF_RANGE"
+      && item.field === field
+      && item.size === "430"
+      && item.value === range.max + 1
+    )), `${field} should reject ${range.max + 1}`);
+  }
+});
+
+test("partial QUICK response retains 430 and warns for missing Wheelbase and Fork Offset", () => {
+  const result = validateAndNormalizeGeometryParserResponse(createQuickGeometryParserPartialResponse());
+  const size430 = result.sizes.find(({ size }) => size === "430");
+
+  assert.deepEqual(result.detectedSizes, QUICK_SIZES);
+  assert.equal(size430.geometry.wheelbase, null);
+  assert.equal(size430.geometry.forkOffset, null);
+  assert.ok(result.warnings.some(({ code, field, size }) => code === "CELL_UNRECOGNIZED" && field === "wheelbase" && size === "430"));
+  assert.ok(result.warnings.some(({ code, field, size }) => code === "CELL_UNRECOGNIZED" && field === "forkOffset" && size === "430"));
+
+  const preview = resolveGeometryImportPreview(geometryParserResponseToDraft(result).sizes["430"]);
+  assert.equal(preview.isValid, true);
+  assert.equal(preview.geometry.wheelbase, 1010);
+  assert.equal(preview.geometrySources.wheelbase, "estimated");
+  assert.equal(preview.geometrySources.forkOffset, "estimated");
+  assert.equal(preview.geometryCompleteness, "approximate");
 });
 
 test("validator uses detectedSizes as source order without shifting keyed geometry", () => {
@@ -137,8 +272,10 @@ test("analyzer uses an injected parser and maps response into the existing draft
   const file = createPngFile();
   const draft = await analyzeGeometryImage(file, { parserClient });
   assert.strictEqual(receivedFile, file);
-  assert.deepEqual(Object.keys(draft.sizes), QUICK_SIZES);
-  assert.equal(draft.sizes["550"].stack, 610.6);
+  assert.deepEqual(Object.keys(draft.sizes), ["430"]);
+  assert.deepEqual(Object.keys(draft.candidateSizes), QUICK_SIZES);
+  assert.deepEqual(draft.selectedImportSizes, ["430"]);
+  assert.equal(draft.candidateSizes["550"].stack, 610.6);
   assert.equal(draft.selectedSize, "430");
   assert.equal(draft.parserWarnings.length, 0);
   assert.doesNotMatch(analyzerSource, /createMockGeometryImportDraft|mockGeometryImport/);
@@ -201,7 +338,7 @@ test("qwen provider sends image bytes in non-thinking JSON Object mode", async (
   assert.equal(providerRequest.body.enable_thinking, false);
   assert.deepEqual(providerRequest.body.response_format, { type: "json_object" });
   assert.match(providerRequest.body.messages[0].content[0].text, /valid JSON Object/);
-  assert.match(providerRequest.body.messages[0].content[0].text, /seatTubeLength/);
+  assert.match(providerRequest.body.messages[0].content[0].text, /rawRows/);
   assert.match(providerRequest.body.messages[1].content[0].image_url.url, /^data:image\/png;base64,/);
   assert.deepEqual(result.structuredOutput.detectedSizes, QUICK_SIZES);
   assert.equal(result.meta.provider, "qwen");
@@ -300,6 +437,107 @@ test("worker validates an injected fixture provider result without network acces
   assert.equal(payload.detectedSizeCount, 5);
   assert.deepEqual(payload.detectedSizes, QUICK_SIZES);
   assert.equal(payload.meta.provider, "fixture");
+  assert.equal(payload.meta.parserProtocolVersion, "raw-table-v1");
+});
+
+test("qwen rejects normalized output that omits required rawRows", async () => {
+  const worker = createGeometryParserWorker({
+    providerResolver: () => ({
+      async parse() {
+        return { structuredOutput: createQuickGeometryParserFixture(), meta: { provider: "qwen" } };
+      },
+    }),
+  });
+  const formData = new FormData();
+  formData.append("image", createPngFile());
+  const response = await worker.fetch(new Request("https://parser.example.test/api/geometry/parse", {
+    method: "POST",
+    body: formData,
+  }), { GEOMETRY_PARSER_PROVIDER: "qwen" });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "RAW_TABLE_REQUIRED");
+  assert.equal(payload.error.message, "模型未返回完整原始几何表结构，请重新识别。");
+  assert.equal(payload.sizes, undefined);
+});
+
+test("qwen rejects an empty raw table before deterministic mapping", async () => {
+  const worker = createGeometryParserWorker({
+    providerResolver: () => ({
+      async parse() {
+        return {
+          structuredOutput: { detectedSizeCount: 5, detectedSizes: QUICK_SIZES, rawRows: [] },
+          meta: { provider: "qwen" },
+        };
+      },
+    }),
+  });
+  const formData = new FormData();
+  formData.append("image", createPngFile());
+  const response = await worker.fetch(new Request("https://parser.example.test/api/geometry/parse", {
+    method: "POST",
+    body: formData,
+  }), { GEOMETRY_PARSER_PROVIDER: "qwen" });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "RAW_TABLE_REQUIRED");
+});
+
+test("qwen rejects raw rows whose value count does not match the detected sizes", async () => {
+  const malformedRawTable = createQuickGeometryParserRawTableFixture();
+  malformedRawTable.rawRows.find(({ label }) => label === "G 轮轴距").values.pop();
+  const worker = createGeometryParserWorker({
+    providerResolver: () => ({
+      async parse() {
+        return { structuredOutput: malformedRawTable, meta: { provider: "qwen" } };
+      },
+    }),
+  });
+  const formData = new FormData();
+  formData.append("image", createPngFile());
+  const response = await worker.fetch(new Request("https://parser.example.test/api/geometry/parse", {
+    method: "POST",
+    body: formData,
+  }), { GEOMETRY_PARSER_PROVIDER: "qwen" });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "RAW_TABLE_COLUMN_COUNT_MISMATCH");
+  assert.deepEqual(payload.error.details, [{
+    rowIndex: 6,
+    label: "G 轮轴距",
+    valueCount: 4,
+    detectedSizeCount: 5,
+  }]);
+});
+
+test("worker requests raw table extraction and maps source labels deterministically", async () => {
+  let receivedPrompt = "";
+  let receivedSchema = null;
+  const worker = createGeometryParserWorker({
+    providerResolver: () => ({
+      id: "fixture",
+      async parse({ prompt, schema }) {
+        receivedPrompt = prompt;
+        receivedSchema = schema;
+        return { structuredOutput: createQuickGeometryParserRawTableFixture(), meta: { provider: "fixture" } };
+      },
+    }),
+  });
+  const formData = new FormData();
+  formData.append("image", createPngFile());
+  const response = await worker.fetch(new Request("https://parser.example.test/api/geometry/parse", {
+    method: "POST",
+    body: formData,
+  }), {});
+
+  assert.equal(response.status, 200);
+  assert.equal(receivedSchema, GEOMETRY_PARSER_RAW_TABLE_SCHEMA);
+  assert.match(receivedPrompt, /rawRows/);
+  assert.match(receivedPrompt, /preserve the source label text/);
+  assert.match(receivedPrompt, /Do not infer a row's meaning from diagram letters/);
 });
 
 test("qwen failure never calls openai or substitutes mock data", async () => {
@@ -370,7 +608,9 @@ test("draft adapter preserves official size strings and parser warnings", () => 
   const fixture = validateAndNormalizeGeometryParserResponse(createQuickGeometryParserFixture());
   fixture.warnings.push({ code: "TEST", message: "550 尺码 Stack 未可靠识别。", field: "stack", size: "550" });
   const draft = geometryParserResponseToDraft(fixture);
-  assert.deepEqual(Object.keys(draft.sizes), QUICK_SIZES);
+  assert.deepEqual(Object.keys(draft.sizes), ["430"]);
+  assert.deepEqual(Object.keys(draft.candidateSizes), QUICK_SIZES);
   assert.equal(draft.detectedSizeCount, 5);
-  assert.equal(draft.parserWarnings[0].size, "550");
+  assert.equal(draft.parserWarnings.length, 0);
+  assert.equal(draft.allParserWarnings[0].size, "550");
 });

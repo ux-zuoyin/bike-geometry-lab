@@ -229,10 +229,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .geometry-import__category { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 10px; }
 .geometry-import__category strong { padding: 5px 9px; border-radius: 9px; background: var(--selected-bg); color: var(--selected-text); font-size: var(--font-size-sm); }
 .geometry-import__category small { grid-column: 1 / -1; color: var(--tertiary); font-size: var(--font-size-xs); }
-.geometry-import__sizes { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
-.geometry-import__sizes button { min-width: 42px; height: 38px; padding: 5px 9px; border: 0; border-radius: 9px; background: var(--control-bg); color: var(--control-text); cursor: pointer; transition: var(--control-transition); }
-.geometry-import__sizes button:hover { background: var(--control-bg-hover); color: var(--control-text-hover); }
-.geometry-import__sizes button.is-selected { background: var(--selected-bg); color: var(--selected-text); box-shadow: var(--selected-shadow); font-weight: 650; }
+.geometry-import__candidate-sizes, .geometry-import__selected-sizes { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.geometry-import__selected-sizes { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.geometry-import__candidate-sizes button, .geometry-import__selected-sizes button { width: 52px; min-width: 52px; height: 40px; padding: 0 5px; border: 0; border-radius: 9px; background: var(--control-bg); color: var(--control-text); display: flex; flex: 0 0 52px; align-items: center; justify-content: center; overflow: hidden; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; transition: var(--control-transition); }
+.geometry-import__candidate-sizes button { position: relative; }
+.geometry-import__candidate-sizes button:hover, .geometry-import__selected-sizes button:hover { background: var(--control-bg-hover); color: var(--control-text-hover); }
+.geometry-import__candidate-sizes button.is-selected, .geometry-import__selected-sizes button.is-selected { background: var(--selected-bg); color: var(--selected-text); box-shadow: var(--selected-shadow); font-weight: 650; }
+.geometry-import__candidate-sizes button.is-selected::after { content: "✓"; position: absolute; top: 3px; right: 4px; color: rgba(255,255,255,.92); font-size: 10px; font-weight: 700; line-height: 1; }
 .geometry-import__review-title > div { min-width: 0; display: grid; gap: 2px; }
 .geometry-import__review-title > div > span { color: var(--muted); font-size: var(--font-size-xs); }
 .geometry-import__add-size { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
@@ -243,18 +246,26 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .geometry-import__add-size button { min-height: 38px; padding: 7px 10px; border: 0; border-radius: 9px; background: var(--control-bg); color: var(--control-text); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .geometry-import__add-size button:hover { background: var(--control-bg-hover); color: var(--control-text-hover); }
 .geometry-import__field-list { margin-top: 10px; border-top: 1px solid var(--line); }
-.geometry-import__field-list > label { position: relative; min-height: 48px; padding: 7px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) 118px; align-items: center; gap: 4px 10px; }
-.geometry-import__field-list > label:last-child { border-bottom: 0; }
-.geometry-import__field-list > label > span:first-child { min-width: 0; display: grid; gap: 1px; }
-.geometry-import__field-list > label > span:first-child strong { overflow: hidden; text-overflow: ellipsis; font-size: var(--font-size-sm); font-weight: 560; white-space: nowrap; }
-.geometry-import__field-list > label > span:first-child small { color: var(--status-warning); font-size: var(--font-size-xs); }
+.geometry-import__field-row { position: relative; min-height: 66px; padding: 8px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) 118px; align-items: center; gap: 5px 10px; }
+.geometry-import__field-row:last-child { border-bottom: 0; }
+.geometry-import__field-name { min-width: 0; align-self: stretch; display: flex; align-items: flex-start; gap: 3px; }
+.geometry-import__field-name > label { min-width: 0; padding: 1px 0; color: var(--ink); display: grid; align-content: start; gap: 3px; cursor: text; }
+.geometry-import__field-name > label strong { font-size: var(--font-size-base); font-weight: 600; line-height: var(--line-height-control); white-space: normal; }
+.geometry-import__field-translation { color: rgba(244,246,248,.52); font-size: var(--font-size-sm); font-weight: 400; line-height: var(--line-height-control); white-space: normal; }
+.geometry-import__field-name small { color: var(--status-warning); font-size: var(--font-size-xs); line-height: var(--line-height-control); }
+.geometry-import__field-tooltip { position: relative; flex: 0 0 auto; display: inline-flex; margin-top: 1px; }
+.geometry-import__field-tooltip button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: rgba(244,246,248,.42); display: grid; place-items: center; cursor: pointer; }
+.geometry-import__field-tooltip button:hover, .geometry-import__field-tooltip button:focus-visible { background: rgba(255,255,255,.07); color: rgba(244,246,248,.84); }
+.geometry-import__field-tooltip button:focus-visible { outline: 1px solid rgba(22,119,255,.72); outline-offset: 1px; }
+.geometry-import__field-tooltip [role="tooltip"] { position: absolute; top: calc(100% + 7px); left: -6px; z-index: 20; width: max-content; max-width: min(290px, calc(100vw - 64px)); padding: 9px 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 9px; background: rgba(10,12,16,.92); box-shadow: 0 8px 20px rgba(0,0,0,.2); backdrop-filter: blur(18px) saturate(110%); -webkit-backdrop-filter: blur(18px) saturate(110%); color: rgba(244,246,248,.78); font-size: var(--font-size-sm); font-weight: 500; line-height: 1.45; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease; pointer-events: none; }
+.geometry-import__field-tooltip:hover [role="tooltip"], .geometry-import__field-tooltip:focus-within [role="tooltip"] { opacity: 1; visibility: visible; transform: translateY(0); }
 .geometry-import__number-input { height: 34px; border-radius: 8px; background: var(--control-bg); display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; overflow: hidden; }
 .geometry-import__number-input input { min-width: 0; width: 100%; height: 34px; padding: 6px 4px 6px 9px; border: 0; outline: 0; background: transparent; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; }
 .geometry-import__number-input input::-webkit-inner-spin-button { appearance: none; }
 .geometry-import__number-input input:focus { box-shadow: inset 0 0 0 1px var(--brand-primary-border); }
 .geometry-import__number-input small { color: var(--tertiary); font-size: var(--font-size-xs); text-align: center; }
-.geometry-import__field-list label.has-error .geometry-import__number-input { box-shadow: inset 0 0 0 1px rgba(255,77,94,.58); }
-.geometry-import__field-list label.has-error .geometry-import__number-input:has(input:focus) { box-shadow: 0 0 0 2px rgba(255,77,94,.18), inset 0 0 0 1px rgba(255,77,94,.72); }
+.geometry-import__field-row.has-error .geometry-import__number-input { box-shadow: inset 0 0 0 1px rgba(255,77,94,.58); }
+.geometry-import__field-row.has-error .geometry-import__number-input:has(input:focus) { box-shadow: 0 0 0 2px rgba(255,77,94,.18), inset 0 0 0 1px rgba(255,77,94,.72); }
 .geometry-import__number-input input[aria-invalid="true"]:focus { box-shadow: none; }
 .geometry-import__field-list em { grid-column: 1 / -1; color: var(--status-error); font-size: var(--font-size-xs); font-style: normal; line-height: var(--line-height-control); }
 .geometry-import [data-validation-key] { scroll-margin-block: 96px 132px; }
@@ -323,7 +334,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .size-selector-area { width: 304px; min-height: 40px; }
 .size-selector-area .field-block { width: 304px; min-height: 40px; }
 .size-selector-area .segmented { width: 304px; min-height: 40px; display: grid; grid-template-columns: repeat(7, 40px); gap: 4px; align-content: start; }
-.size-selector-area .segmented button { width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.size-selector-area .segmented button { width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
 
 .frame-appearance__palette + .frame-appearance__palette { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.05); }
 .color-config__header { min-height: 22px; margin-bottom: 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -541,6 +552,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .fullscreen-geometry-summary__metric-value.is-missing strong { color: rgba(255,255,255,.38); font-weight: 600; }
 
 .canvas-wrap { min-height: 0; position: relative; overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.geometry-preview-empty { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 7px; padding: 24px; color: var(--muted); text-align: center; pointer-events: none; }
+.geometry-preview-empty strong { color: rgba(244,246,248,.86); font-size: var(--font-size-md); font-weight: 650; }
+.geometry-preview-empty span { max-width: 320px; font-size: var(--font-size-sm); line-height: var(--line-height-body); }
 .side-panel::before,
 .side-panel::after,
 .frame-panel::before,

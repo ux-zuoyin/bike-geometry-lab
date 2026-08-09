@@ -18,6 +18,51 @@ export const GEOMETRY_PARSER_FIELD_KEYS = Object.freeze(
   GEOMETRY_PARSER_FIELDS.map(({ key }) => key),
 );
 
+export const GEOMETRY_PARSER_PLAUSIBILITY_RANGES = Object.freeze({
+  stack: Object.freeze({ min: 350, max: 800, unit: "mm" }),
+  reach: Object.freeze({ min: 250, max: 550, unit: "mm" }),
+  seatTubeLength: Object.freeze({ min: 250, max: 700, unit: "mm" }),
+  effectiveTopTube: Object.freeze({ min: 400, max: 700, unit: "mm" }),
+  headTubeLength: Object.freeze({ min: 60, max: 300, unit: "mm" }),
+  seatTubeAngle: Object.freeze({ min: 65, max: 85, unit: "°" }),
+  headTubeAngle: Object.freeze({ min: 60, max: 80, unit: "°" }),
+  chainstay: Object.freeze({ min: 350, max: 500, unit: "mm" }),
+  wheelbase: Object.freeze({ min: 850, max: 1300, unit: "mm" }),
+  bbDrop: Object.freeze({ min: 30, max: 120, unit: "mm" }),
+  forkOffset: Object.freeze({ min: 25, max: 80, unit: "mm" }),
+});
+
+const rawTableRowSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["label", "unit", "values"],
+  properties: {
+    label: { type: "string", minLength: 1 },
+    unit: { type: ["string", "null"] },
+    values: {
+      type: "array",
+      items: { type: ["number", "null"] },
+    },
+  },
+});
+
+export const GEOMETRY_PARSER_RAW_TABLE_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["detectedSizeCount", "detectedSizes", "rawRows"],
+  properties: {
+    detectedSizeCount: { type: "integer", minimum: 0 },
+    detectedSizes: {
+      type: "array",
+      items: { type: "string", minLength: 1 },
+    },
+    rawRows: {
+      type: "array",
+      items: rawTableRowSchema,
+    },
+  },
+});
+
 const nullableNumberSchema = Object.freeze({ type: ["number", "null"] });
 
 const geometryProperties = Object.fromEntries(
@@ -96,4 +141,3 @@ export const GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA = Object.freeze({
     },
   },
 });
-

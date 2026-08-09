@@ -22,13 +22,16 @@ const MOCK_GEOMETRY_SIZES = Object.freeze({
 });
 
 export function createMockGeometryImportDraft() {
+  const candidateSizes = Object.fromEntries(
+    Object.entries(MOCK_GEOMETRY_SIZES).map(([size, geometry]) => [size, { ...geometry }]),
+  );
   return {
     brand: "",
     model: "",
     category: "endurance",
-    sizes: Object.fromEntries(
-      Object.entries(MOCK_GEOMETRY_SIZES).map(([size, geometry]) => [size, { ...geometry }]),
-    ),
+    candidateSizes,
+    sizes: { 54: { ...candidateSizes[54] } },
+    selectedImportSizes: ["54"],
     selectedSize: "54",
   };
 }
