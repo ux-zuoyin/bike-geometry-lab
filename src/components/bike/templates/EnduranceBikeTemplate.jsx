@@ -139,7 +139,7 @@ function MotionLayer({ children, center, durationSeconds, phaseOffset = 0, rende
 
 function PedalContactMarker({ point }) {
   return (
-    <g className="contact-point contact-point--pedal" data-pedal-contact-marker="true">
+    <g className="contact-point contact-point--pedal" data-pedal-contact-marker="true" style={{ opacity: "var(--bike-contact-opacity, 1)" }}>
       <circle cx={point.x} cy={point.y} r={4.5} />
       <circle className="contact-point__halo" cx={point.x} cy={point.y} r={9} />
       <text x={point.x + 10} y={point.y - 9}>P</text>
@@ -174,7 +174,7 @@ function ProgrammaticStem({ start, end }) {
 
 function HandlebarContactMarker({ point }) {
   return (
-    <g className="contact-point contact-point--handlebar" data-handlebar-contact-marker="true">
+    <g className="contact-point contact-point--handlebar" data-handlebar-contact-marker="true" style={{ opacity: "var(--bike-contact-opacity, 1)" }}>
       <circle cx={point.x} cy={point.y} r={4.5} />
       <circle className="contact-point__halo" cx={point.x} cy={point.y} r={9} />
       <text x={point.x + 10} y={point.y - 9}>H</text>
@@ -401,7 +401,7 @@ function FigmaAnchorDebug({ matrices, parentAnchors, cockpitVisualAnchors, seatp
     },
   ];
   return (
-    <g className="figma-anchor-debug" aria-label="Figma 配件连接锚点" data-render-layer="anchors">
+    <g className="figma-anchor-debug" aria-label="Figma 配件连接锚点" data-render-layer="anchors" style={{ opacity: "var(--bike-debug-opacity, 1)" }}>
       <g
         className="head-tube-debug"
         data-base-visual-size={ENDURANCE_VISUAL_BASE_SIZE}

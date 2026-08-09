@@ -834,7 +834,7 @@ test("Bike Stage aligns both 700C wheel contact points to one responsive Prism g
   assert.match(stylesSource, /\.bike-canvas\s*\{[^}]*overflow:\s*visible;/);
 });
 
-test("Bike reflection is a literal 20% BikeVisualOnly mirror around the responsive ground baseline", () => {
+test("Bike reflection reuses the primary animated bike around the responsive ground baseline", () => {
   const reflectionIndex = bikeVisualizerSource.indexOf('className="bike-reflection"');
   const mainBikeIndex = bikeVisualizerSource.indexOf('<g className="stage-content"');
 
@@ -842,16 +842,21 @@ test("Bike reflection is a literal 20% BikeVisualOnly mirror around the responsi
   assert.match(bikeVisualizerSource, /const REFLECTION_OPACITY = 0\.2/);
   assert.match(bikeVisualizerSource, /const REFLECTION_GAP_PX = 2/);
   assert.match(bikeVisualizerSource, /const reflectionGap = REFLECTION_GAP_PX \/ groundAlignment\.stageScale/);
-  assert.match(bikeVisualizerSource, /function BikeVisualOnly\([\s\S]*showFigmaAnchors=\{false\}[\s\S]*showContactPoints=\{false\}/);
+  assert.match(bikeVisualizerSource, /const BIKE_VISUAL_SOURCE_ID = "bike-visual-source"/);
+  assert.match(bikeVisualizerSource, /<g id=\{BIKE_VISUAL_SOURCE_ID\} data-bike-visual-source="primary">[\s\S]*<RoadBikeVisual/);
   assert.match(bikeVisualizerSource, /`translate\(0 \$\{reflectionGap\}\)`[\s\S]*`translate\(0 \$\{groundAlignment\.stageGroundY\}\)`[\s\S]*"scale\(1 -1\)"[\s\S]*`translate\(0 \$\{-groundAlignment\.stageGroundY\}\)`/);
   assert.match(bikeVisualizerSource, /data-reflection-gap-px=\{REFLECTION_GAP_PX\}/);
-  assert.match(bikeVisualizerSource, /className="bike-reflection"[\s\S]*opacity=\{REFLECTION_OPACITY\}[\s\S]*data-reflection-source="BikeVisualOnly"[\s\S]*data-reflection-transform="scaleY\(-1\)"[\s\S]*<BikeVisualOnly/);
+  assert.match(bikeVisualizerSource, /className="bike-reflection"[\s\S]*opacity=\{REFLECTION_OPACITY\}[\s\S]*data-reflection-source="shared-bike-visual-use"[\s\S]*data-reflection-transform="scaleY\(-1\)"[\s\S]*<use[\s\S]*href=\{`#\$\{BIKE_VISUAL_SOURCE_ID\}`\}[\s\S]*data-reflection-instance="shared-animation-timeline"/);
+  assert.equal(bikeVisualizerSource.match(/<RoadBikeVisual\b/g)?.length, 1);
+  assert.doesNotMatch(bikeVisualizerSource, /function BikeVisualOnly|<BikeVisualOnly/);
   assert.match(stylesSource, /\.bike-reflection\s*\{[^}]*pointer-events:\s*none;/);
   assert.doesNotMatch(bikeVisualizerSource, /REFLECTION_(?:BLUR|SATURATION|BRIGHTNESS|HEIGHT|MAX)|reflectionCanvasRef|bike-reflection-canvas/);
   assert.doesNotMatch(stylesSource, /\.bike-reflection[^}]*?(?:filter|mask|gradient|blur|brightness|saturate)/s);
   assert.match(roadBikeVisualSource, /showContactPoints = true/);
   assert.match(enduranceTemplateSource, /showContactPoints && <PedalContactMarker/);
   assert.match(enduranceTemplateSource, /showContactPoints && \([\s\S]*<HandlebarContactMarker/);
+  assert.match(enduranceTemplateSource, /--bike-contact-opacity/);
+  assert.match(enduranceTemplateSource, /--bike-debug-opacity/);
   assert.doesNotMatch(bikeVisualizerSource.slice(reflectionIndex, mainBikeIndex), /<ContactPoint|<DimensionLine|<AngleIndicator|<GeometrySkeleton|bb-origin/);
 });
 

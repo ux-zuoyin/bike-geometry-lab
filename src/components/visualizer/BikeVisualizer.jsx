@@ -22,25 +22,14 @@ import { AngleIndicator, ContactPoint, DimensionLine } from "./annotations.jsx";
 const IS_DEVELOPMENT = import.meta.env.DEV;
 const REFLECTION_OPACITY = 0.2;
 const REFLECTION_GAP_PX = 2;
-
-function BikeVisualOnly({ data, projector, componentSetup, motionStopped }) {
-  return (
-    <RoadBikeVisual
-      data={data}
-      project={projector}
-      preset={bikeArchetypes.endurance}
-      showFigmaAnchors={false}
-      showContactPoints={false}
-      componentSetup={componentSetup}
-      motionStopped={motionStopped}
-    />
-  );
-}
+const BIKE_VISUAL_SOURCE_ID = "bike-visual-source";
 
 function BikeLayer({ data, projector, showSkeleton, showFigmaAnchors, componentSetup, motionStopped }) {
   return (
     <g className="bike-layer bike-layer--primary">
-      <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} componentSetup={componentSetup} motionStopped={motionStopped} />
+      <g id={BIKE_VISUAL_SOURCE_ID} data-bike-visual-source="primary">
+        <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} componentSetup={componentSetup} motionStopped={motionStopped} />
+      </g>
       {showSkeleton && <GeometrySkeleton anchors={data.anchors} cockpit={data.cockpit} project={projector} />}
       <ContactPoint point={data.contacts.saddle} project={projector} label="S" kind="saddle" />
     </g>
@@ -151,14 +140,16 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
             aria-hidden="true"
             opacity={REFLECTION_OPACITY}
             transform={reflectionTransform}
-            data-reflection-source="BikeVisualOnly"
+            data-reflection-source="shared-bike-visual-use"
             data-reflection-transform="scaleY(-1)"
           >
-            <BikeVisualOnly
-              data={data}
-              projector={project}
-              componentSetup={componentSetup}
-              motionStopped={isMotionStopped}
+            <use
+              href={`#${BIKE_VISUAL_SOURCE_ID}`}
+              style={{
+                "--bike-contact-opacity": 0,
+                "--bike-debug-opacity": 0,
+              }}
+              data-reflection-instance="shared-animation-timeline"
             />
           </g>
 
