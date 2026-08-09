@@ -20,7 +20,7 @@ import {
   updateWheelSelection,
   updateWheelSelectionLink,
 } from "../src/config/bikeComponents.js";
-import { DEFAULT_FIT_SETUP, toGeometryFit } from "../src/config/fitSetup.js";
+import { DEFAULT_FIT_SETUP, STEM_ANGLE_OPTIONS, toGeometryFit } from "../src/config/fitSetup.js";
 import {
   COLOR_PRESETS,
   DEFAULT_BIKE_COLORS,
@@ -131,6 +131,10 @@ const setupPanelSource = readFileSync(
   new URL("../src/components/panels/BikeSetupPanel.jsx", import.meta.url),
   "utf8",
 );
+const rangeControlSource = readFileSync(
+  new URL("../src/components/ui/RangeControl.jsx", import.meta.url),
+  "utf8",
+);
 const colorPaletteSource = readFileSync(
   new URL("../src/components/ui/ColorPalette.jsx", import.meta.url),
   "utf8",
@@ -227,7 +231,7 @@ test("Cockpit Geometry follows the steerer axis and uses nominal stem angle", ()
   assert.deepEqual(DEFAULT_FIT_SETUP, {
     spacerHeight: 15,
     stemLength: 110,
-    stemAngle: -13,
+    stemAngle: -12,
     saddleHeight: 738,
     saddleSetback: 8,
     crankLength: 170,
@@ -549,6 +553,15 @@ test("Setup persistence gives valid saved fields priority and falls back safely"
   assert.deepEqual(readPersistedBikeSetup(storage), createDefaultBikeSetup());
   assert.deepEqual(parsePersistedBikeSetup("not-json"), createDefaultBikeSetup());
 
+  for (const stemAngle of STEM_ANGLE_OPTIONS) {
+    const setup = parsePersistedBikeSetup(JSON.stringify({ fitSetup: { stemAngle } }));
+    assert.equal(setup.fitSetup.stemAngle, stemAngle);
+  }
+  for (const stemAngle of [-16, -13, -11, -9, 3]) {
+    const setup = parsePersistedBikeSetup(JSON.stringify({ fitSetup: { stemAngle } }));
+    assert.equal(setup.fitSetup.stemAngle, DEFAULT_FIT_SETUP.stemAngle);
+  }
+
   assert.equal(persistBikeSetup(saved, storage), true);
   assert.deepEqual(readPersistedBikeSetup(storage), saved);
 });
@@ -573,8 +586,38 @@ test("Wheel and Tire stay split, registry-driven, and axle-centered", () => {
   assert.match(enduranceTemplateSource, /const tireLayers = tire\.visualLayers \?\?/);
   assert.match(enduranceTemplateSource, /tireLayers\.map\(\(tireLayer, index\)/);
   assert.doesNotMatch(enduranceTemplateSource, /wheelVisual\.rear|wheelVisual\.front/);
-  assert.match(enduranceTemplateSource, /asset=\{frontRotor\}/);
-  assert.match(enduranceTemplateSource, /asset=\{rearRotor\}/);
+  assert.equal((enduranceTemplateSource.match(/asset=\{brakeDisc\}/g) ?? []).length, 1);
+  assert.match(enduranceTemplateSource, /axle=\{data\.frame\.frontAxle\}[\s\S]*renderLayer="front-rotor"/);
+  assert.doesNotMatch(enduranceTemplateSource, /renderLayer="rear-rotor"/);
+  assert.doesNotMatch(enduranceTemplateSource, /import (?:frontRotor|rearRotor)/);
+
+  const brakeDiscSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/endurance/brake-disc.svg", import.meta.url),
+    "utf8",
+  );
+  assert.match(brakeDiscSource, /viewBox="0 0 100 100"/);
+  assert.match(brakeDiscSource, /id="Intersect"[\s\S]*fill="#242424"/);
+  assert.match(brakeDiscSource, /id="Subtract"[\s\S]*fill="#CECECE"/);
+  assert.doesNotMatch(brakeDiscSource, /<rect|#8A38F5/);
+});
+
+test("drivetrain resources match the current Figma neutral material", () => {
+  const shimanoSource = readFileSync(
+    new URL("../src/assets/bikeComponents/drivetrain/shimano.svg", import.meta.url),
+    "utf8",
+  );
+  const sramSource = readFileSync(
+    new URL("../src/assets/bikeComponents/drivetrain/sram.svg", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(shimanoSource, /viewBox="0 0 80 110"/);
+  assert.equal((shimanoSource.match(/fill="#1D1D1D"/g) ?? []).length, 1);
+  assert.match(sramSource, /viewBox="0 0 80 110"/);
+  assert.equal((sramSource.match(/fill="#1D1D1D"/g) ?? []).length, 4);
+  assert.match(sramSource, /id="Vector 6"[\s\S]*fill="#1D1D1D"/);
+  assert.match(sramSource, /clip-path="url\(#clip0_4_1915\)"/);
+  assert.doesNotMatch(`${shimanoSource}${sramSource}`, /fill="#(?:454545|3F3F3F)"|fill="black"/);
 });
 
 test("front and rear wheel selections remain independent unless linking is explicitly enabled", () => {
@@ -992,6 +1035,38 @@ test("Geometry annotations use layered white tokens while contact points stay br
   assert.match(stylesSource, /\.contact-point circle:first-child\s*\{[^}]*stroke:\s*var\(--accent\);/s);
 });
 
+test("Fit Setup uses continuous ranges and an index-driven discrete stem-angle range", () => {
+  assert.equal((setupPanelSource.match(/<RangeControl /g) ?? []).length, 4);
+  assert.equal((setupPanelSource.match(/<DiscreteRangeControl/g) ?? []).length, 1);
+  assert.doesNotMatch(setupPanelSource, /<Stepper /);
+  for (const control of [
+    'label="垫圈高度" unit="mm" value={fitSetup.spacerHeight} min={0} max={60} step={5}',
+    'label="把立长度" unit="mm" value={fitSetup.stemLength} min={60} max={140} step={10}',
+    'label="坐垫高度" unit="mm" value={fitSetup.saddleHeight} min={620} max={900} step={1}',
+    'label="坐垫后移" unit="mm" value={fitSetup.saddleSetback} min={-30} max={60} step={1}',
+  ]) {
+    assert.ok(setupPanelSource.includes(control), `${control} must retain its requested range contract`);
+  }
+  assert.deepEqual(STEM_ANGLE_OPTIONS, [-17, -12, -10, -8, -6, 0, 6, 7, 8, 10, 12]);
+  assert.equal(DEFAULT_FIT_SETUP.stemAngle, -12);
+  assert.match(setupPanelSource, /<DiscreteRangeControl[\s\S]*label="把立角度"[\s\S]*value=\{fitSetup\.stemAngle\}[\s\S]*options=\{STEM_ANGLE_OPTIONS\}[\s\S]*tickValues=\{\[-17, -6, 0, 6, 12\]\}/);
+  assert.match(setupPanelSource, /options=\{\[165, 170, 172\.5, 175\]\}/);
+  assert.match(rangeControlSource, /type="range"/);
+  assert.match(rangeControlSource, /onChange=\{\(event\) => update\(event\.target\.value\)\}/);
+  assert.match(rangeControlSource, /onClick=\{\(\) => update\(value - step\)\}/);
+  assert.match(rangeControlSource, /onClick=\{\(\) => update\(value \+ step\)\}/);
+  assert.match(rangeControlSource, /min < 0 && max > 0/);
+  assert.match(rangeControlSource, /min=\{0\}[\s\S]*max=\{maxIndex\}[\s\S]*step=\{1\}[\s\S]*value=\{selectedIndex\}/);
+  assert.match(rangeControlSource, /onChange=\{\(event\) => updateIndex\(event\.target\.value\)\}/);
+  assert.match(rangeControlSource, /onChange\(options\[clampedIndex\]\)/);
+  assert.doesNotMatch(setupPanelSource, /label="把立角度"[^>]*min=\{-17\}|label="把立角度"[^>]*step=\{1\}/);
+  assert.match(stylesSource, /\.range-control__track-wrap input\[type="range"\][\s\S]*background-image:\s*linear-gradient\(to right, var\(--selected-bg\)/);
+  assert.match(stylesSource, /\.range-control__zero\s*\{[^}]*background:\s*rgba\(255,255,255,\.46\);/s);
+  assert.match(stylesSource, /\.range-control__tick\.is-selected\s*\{[^}]*background:\s*var\(--selected-bg\);/s);
+  assert.match(stylesSource, /\.range-control__tick-label\s*\{[^}]*color:\s*var\(--tertiary\);/s);
+  assert.match(stylesSource, /input\[type="range"\]:focus-visible::-webkit-slider-thumb/);
+});
+
 test("selected and unselected option controls share one high-contrast state system", () => {
   assert.match(stylesSource, /--control-bg:\s*rgba\(255,255,255,\.06\);/);
   assert.match(stylesSource, /--control-bg-hover:\s*rgba\(255,255,255,\.10\);/);
@@ -1220,6 +1295,28 @@ test("Figma endurance frame uses the new semantic split nodes", () => {
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frame, undefined);
 });
 
+test("top and down tube assets preserve Figma connection-completion layers above their main paths", () => {
+  const topTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/endurance/frame-top-tube.svg", import.meta.url),
+    "utf8",
+  );
+  const downTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/endurance/frame-down-tube.svg", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal((topTubeSource.match(/<path /g) ?? []).length, 2);
+  assert.equal((downTubeSource.match(/<path /g) ?? []).length, 3);
+  assert.ok(topTubeSource.indexOf("M394.471 27.5") < topTubeSource.indexOf("M384.886 39.5322"));
+  assert.ok(downTubeSource.indexOf("M339.384 47.5") < downTubeSource.indexOf("M307.384 23"));
+  assert.ok(downTubeSource.indexOf("M307.384 23") < downTubeSource.indexOf("M328.384 67"));
+  assert.equal((topTubeSource.match(/fill="black"/g) ?? []).length, 2);
+  assert.equal((downTubeSource.match(/fill="black"/g) ?? []).length, 3);
+  assert.doesNotMatch(`${topTubeSource}${downTubeSource}`, /<rect|<filter|border-radius/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameTopTubeSource, "black", components\.frameColor\)/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameDownTubeSource, "black", components\.frameColor\)/);
+});
+
 test("Fork visual leaves a 6px axial head gap while keeping FrontAxle exact", () => {
   assert.match(enduranceTemplateSource, /const FORK_HEAD_GAP_PX = 6/);
   assert.match(enduranceTemplateSource, /forkAxisDelta\.x \/ forkAxisLength \* FORK_HEAD_GAP_PX/);
@@ -1233,7 +1330,6 @@ test("Endurance SVG keeps non-drive crank behind wheels and drive crank in front
   const renderOrderTokens = [
     'renderLayer="non-drive-crank"',
     'renderLayer="front-rotor"',
-    'renderLayer="rear-rotor"',
     'renderLayer="rear-wheel"',
     'renderLayer="cassette"',
     'renderLayer="front-wheel"',

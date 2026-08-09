@@ -1,6 +1,6 @@
 import { BikeComponents, DEFAULT_COMPONENT_SETUP } from "./bikeComponents.js";
 import { BIKE_COLOR_KEYS, normalizeBikeColor } from "./colorPresets.js";
-import { DEFAULT_FIT_SETUP } from "./fitSetup.js";
+import { DEFAULT_FIT_SETUP, STEM_ANGLE_OPTIONS } from "./fitSetup.js";
 
 export const BIKE_SETUP_STORAGE_KEY = "bike-geometry-lab:setup:v1";
 
@@ -36,6 +36,9 @@ export function createDefaultBikeSetup() {
 export function sanitizeFitSetup(candidate) {
   return Object.fromEntries(FIT_SETUP_KEYS.map((key) => {
     const value = candidate?.[key];
+    if (key === "stemAngle") {
+      return [key, STEM_ANGLE_OPTIONS.includes(value) ? value : DEFAULT_FIT_SETUP.stemAngle];
+    }
     return [key, typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_FIT_SETUP[key]];
   }));
 }

@@ -1,5 +1,4 @@
-import frontRotor from "../../../assets/bikeTemplates/endurance/front-rotor.svg";
-import rearRotor from "../../../assets/bikeTemplates/endurance/rear-rotor.svg";
+import brakeDisc from "../../../assets/bikeTemplates/endurance/brake-disc.svg";
 import seatpost from "../../../assets/bikeTemplates/endurance/seatpost.svg";
 import saddle from "../../../assets/bikeTemplates/endurance/saddle.svg";
 import spacer from "../../../assets/bikeTemplates/endurance/spacer.svg";
@@ -804,8 +803,7 @@ export function EnduranceBikeTemplate({
           <TemplateAsset asset={components.crank.visualResource} layer={components.crank.sourceBounds} transform={nonDriveCrankMatrix} className="figma-bike__component figma-bike__non-drive-crank" />
         </g>
       </MotionLayer>
-      <FixedRotor axle={data.frame.frontAxle} asset={frontRotor} layer={layers.frontRotor} project={project} renderLayer="front-rotor" />
-      <FixedRotor axle={data.frame.rearAxle} asset={rearRotor} layer={layers.rearRotor} project={project} renderLayer="rear-rotor" />
+      <FixedRotor axle={data.frame.frontAxle} asset={brakeDisc} layer={layers.frontRotor} project={project} renderLayer="front-rotor" />
       <FixedWheel axle={data.frame.rearAxle} wheel={components.rearWheel} tire={components.tire} layer={layers.rearWheel} project={project} renderLayer="rear-wheel" side="rear" />
       <FixedCassette cassette={components.cassette} center={projected.rearAxle} renderLayer="cassette" />
       <FixedWheel axle={data.frame.frontAxle} wheel={components.frontWheel} tire={components.tire} layer={layers.frontWheel} project={project} renderLayer="front-wheel" side="front" />

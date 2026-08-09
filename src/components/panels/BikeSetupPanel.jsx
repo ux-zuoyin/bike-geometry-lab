@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { BikeComponents } from "../../config/bikeComponents.js";
+import { STEM_ANGLE_OPTIONS } from "../../config/fitSetup.js";
 import { ColorPalette } from "../ui/ColorPalette.jsx";
-import { SegmentedControl, Stepper, Switch } from "../ui/Stepper.jsx";
+import { DiscreteRangeControl, RangeControl } from "../ui/RangeControl.jsx";
+import { SegmentedControl, Switch } from "../ui/Stepper.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 
 const optionsFrom = (resources) => resources.map(({ id, name }) => ({ value: id, label: name }));
@@ -107,15 +109,23 @@ function FitSetupEditor({ fitSetup, updateFitSetup }) {
   return (
     <>
       <PanelSection title="把组">
-        <Stepper label="垫圈高度" unit="mm" value={fitSetup.spacerHeight} min={0} max={60} step={5} onChange={(value) => updateFitSetup("spacerHeight", value)} />
-        <Stepper label="把立长度" unit="mm" value={fitSetup.stemLength} min={60} max={150} step={10} onChange={(value) => updateFitSetup("stemLength", value)} />
-        <Stepper label="把立角度" unit="°" value={fitSetup.stemAngle} min={-25} max={17} step={1} onChange={(value) => updateFitSetup("stemAngle", value)} />
+        <RangeControl label="垫圈高度" unit="mm" value={fitSetup.spacerHeight} min={0} max={60} step={5} onChange={(value) => updateFitSetup("spacerHeight", value)} />
+        <RangeControl label="把立长度" unit="mm" value={fitSetup.stemLength} min={60} max={140} step={10} onChange={(value) => updateFitSetup("stemLength", value)} />
+        <DiscreteRangeControl
+          label="把立角度"
+          unit="°"
+          value={fitSetup.stemAngle}
+          options={STEM_ANGLE_OPTIONS}
+          tickValues={[-17, -6, 0, 6, 12]}
+          signed
+          onChange={(value) => updateFitSetup("stemAngle", value)}
+        />
         <p className="section-note">把立角度以舵管为基准，仅调整把位，不改变车架 Reach。</p>
       </PanelSection>
 
       <PanelSection title="坐垫">
-        <Stepper label="坐垫高度" unit="mm" value={fitSetup.saddleHeight} min={620} max={900} step={5} onChange={(value) => updateFitSetup("saddleHeight", value)} />
-        <Stepper label="坐垫后移" unit="mm" value={fitSetup.saddleSetback} min={-30} max={60} step={2} onChange={(value) => updateFitSetup("saddleSetback", value)} />
+        <RangeControl label="坐垫高度" unit="mm" value={fitSetup.saddleHeight} min={620} max={900} step={1} onChange={(value) => updateFitSetup("saddleHeight", value)} />
+        <RangeControl label="坐垫后移" unit="mm" value={fitSetup.saddleSetback} min={-30} max={60} step={1} onChange={(value) => updateFitSetup("saddleSetback", value)} />
         <p className="section-note">坐垫高度与后移量共同决定坐垫接触点。</p>
       </PanelSection>
 
