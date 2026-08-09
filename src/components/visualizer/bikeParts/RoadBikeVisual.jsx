@@ -17,6 +17,7 @@ export function RoadBikeVisual({
   showContactPoints = true,
   componentSetup,
   motionStopped = false,
+  frameOnly = false,
 }) {
   if (preset.id === "endurance") {
     return (
@@ -27,6 +28,7 @@ export function RoadBikeVisual({
         showContactPoints={showContactPoints}
         componentSetup={componentSetup}
         motionStopped={motionStopped}
+        frameOnly={frameOnly}
       />
     );
   }

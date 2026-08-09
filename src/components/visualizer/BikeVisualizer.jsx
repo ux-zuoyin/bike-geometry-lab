@@ -14,7 +14,12 @@ import {
   createProjector,
 } from "../../lib/geometry/frameGeometry.js";
 import { bikeArchetypes } from "../../config/bikeArchetypes.js";
+import { resolveComponentSetup } from "../../config/bikeComponents.js";
+import { toGeometryFit } from "../../config/fitSetup.js";
+import { getRenderableComponentSetup } from "../../state/dualBikeState.js";
+import { DualBikeControls } from "../comparison/DualBikeControls.jsx";
 import { Switch } from "../ui/Stepper.jsx";
+import { FullscreenGeometrySummary } from "./FullscreenGeometrySummary.jsx";
 import { RoadBikeVisual } from "./bikeParts/RoadBikeVisual.jsx";
 import { GeometrySkeleton } from "./GeometrySkeleton.jsx";
 import { AngleIndicator, ContactPoint, DimensionLine } from "./annotations.jsx";
@@ -22,21 +27,68 @@ import { AngleIndicator, ContactPoint, DimensionLine } from "./annotations.jsx";
 const IS_DEVELOPMENT = import.meta.env.DEV;
 const REFLECTION_OPACITY = 0.2;
 const REFLECTION_GAP_PX = 2;
-const BIKE_VISUAL_SOURCE_ID = "bike-visual-source";
+const getBikeVisualSourceId = (bikeId) => `bike-visual-source-${bikeId}`;
 
-function BikeLayer({ data, projector, showSkeleton, showFigmaAnchors, componentSetup, motionStopped }) {
+function useBikeRenderModel(bike) {
+  return useMemo(() => {
+    const fit = toGeometryFit(bike.fitSetup);
+    return {
+      bike,
+      data: buildBikeGeometry(bike.geometry, fit),
+      componentSetup: resolveComponentSetup(getRenderableComponentSetup(bike)),
+    };
+  }, [bike]);
+}
+
+function BikeRenderer({ model, projector, showSkeleton, showFigmaAnchors, motionStopped, opacity, isPrimary, frameOnly }) {
+  const { bike, data, componentSetup } = model;
+  const sourceId = getBikeVisualSourceId(bike.id);
   return (
-    <g className="bike-layer bike-layer--primary">
-      <g id={BIKE_VISUAL_SOURCE_ID} data-bike-visual-source="primary">
-        <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} componentSetup={componentSetup} motionStopped={motionStopped} />
+    <g
+      className={`bike-layer bike-layer--${isPrimary ? "primary" : "secondary"}`}
+      opacity={opacity}
+      data-bike-renderer={bike.id}
+      data-bike-opacity={opacity}
+    >
+      <g id={sourceId} data-bike-visual-source={bike.id}>
+        <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} showContactPoints={!frameOnly} componentSetup={componentSetup} motionStopped={motionStopped} frameOnly={frameOnly} />
       </g>
       {showSkeleton && <GeometrySkeleton anchors={data.anchors} cockpit={data.cockpit} project={projector} />}
-      <ContactPoint point={data.contacts.saddle} project={projector} label="S" kind="saddle" />
+      {!frameOnly && <ContactPoint point={data.contacts.saddle} project={projector} label="S" kind="saddle" />}
     </g>
   );
 }
 
-export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, onToggleStageFullscreen }) {
+function GeometryPreviewReference({ point, label, project }) {
+  const projected = project(point);
+  return (
+    <g className="geometry-preview-reference" transform={`translate(${projected.x} ${projected.y})`} aria-label={label}>
+      <circle r="8" />
+      <circle r="2.5" className="geometry-preview-reference__dot" />
+      <line x1="-12" y1="0" x2="-5" y2="0" />
+      <line x1="5" y1="0" x2="12" y2="0" />
+      <line x1="0" y1="-12" x2="0" y2="-5" />
+      <line x1="0" y1="5" x2="0" y2="12" />
+      <text x="12" y="-11">{label}</text>
+    </g>
+  );
+}
+
+export function BikeVisualizer({
+  bikes,
+  demoBike,
+  activeBikeIndex,
+  stagePreviewBike,
+  frameOnly = false,
+  geometryImportMode = false,
+  compareEnabled,
+  onActiveBikeChange,
+  onCompareEnabledChange,
+  onAddBike,
+  onManageBike,
+  isStageFullscreen,
+  onToggleStageFullscreen,
+}) {
   const [showDimensions, setShowDimensions] = useState(true);
   const [isMotionStopped, setIsMotionStopped] = useState(false);
   const debugParams = IS_DEVELOPMENT ? new URLSearchParams(window.location.search) : null;
@@ -48,7 +100,17 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
     width: BIKE_STAGE_VIEWBOX_WIDTH,
     height: BIKE_STAGE_VIEWBOX_HEIGHT,
   });
-  const data = useMemo(() => buildBikeGeometry(bike.geometry, fit), [bike.geometry, fit]);
+  const renderBikes = stagePreviewBike ? [stagePreviewBike] : (bikes.length ? bikes : [demoBike]);
+  const safeActiveIndex = activeBikeIndex != null && renderBikes[activeBikeIndex] ? activeBikeIndex : 0;
+  const firstModel = useBikeRenderModel(renderBikes[0]);
+  const secondModel = useBikeRenderModel(renderBikes[1] ?? renderBikes[0]);
+  const renderModelList = [firstModel, secondModel];
+  const primaryModel = renderModelList[safeActiveIndex];
+  const secondaryModel = renderModelList[safeActiveIndex === 0 ? 1 : 0];
+  const isComparisonVisible = bikes.length === 2 && compareEnabled;
+  const renderModels = isComparisonVisible ? [secondaryModel, primaryModel] : [primaryModel];
+  const { bike, data } = primaryModel;
+  const primarySourceId = getBikeVisualSourceId(bike.id);
   const project = useMemo(() => createProjector(), []);
   const wheelbaseY = bike.geometry.bbDrop - WHEEL_RADIUS - 44;
   const rearAxle = project(data.frame.rearAxle);
@@ -99,10 +161,22 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
   return (
     <section className="visualizer" aria-label="Trek Domane 自行车几何可视化">
       <div className="visualizer__header">
-        <div className="bike-title">
-          <h1><span>{bike.brand.toUpperCase()}</span> <strong>{bike.model}</strong> · {bike.size}码</h1>
-          <p>Stack {bike.geometry.stack} mm <span /> Reach {bike.geometry.reach} mm</p>
-        </div>
+        {geometryImportMode ? (
+          <div className="geometry-preview-heading" aria-label="Geometry Import Mode">
+            <strong>Geometry Preview</strong>
+            <span>仅预览 Frame + Fork · 修改参数后实时更新</span>
+          </div>
+        ) : (
+          <DualBikeControls
+            bikes={bikes}
+            activeBikeIndex={activeBikeIndex}
+            compareEnabled={compareEnabled}
+            onActiveBikeChange={onActiveBikeChange}
+            onCompareEnabledChange={onCompareEnabledChange}
+            onAddBike={onAddBike}
+            onManageBike={onManageBike}
+          />
+        )}
         <button
           type="button"
           className="stage-fullscreen-control"
@@ -135,7 +209,7 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
           data-reflection-scale-y="-1"
           data-reflection-gap-px={REFLECTION_GAP_PX}
         >
-          <g
+          {!geometryImportMode && <g
             className="bike-reflection"
             aria-hidden="true"
             opacity={REFLECTION_OPACITY}
@@ -144,24 +218,40 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
             data-reflection-transform="scaleY(-1)"
           >
             <use
-              href={`#${BIKE_VISUAL_SOURCE_ID}`}
+              href={`#${primarySourceId}`}
               style={{
                 "--bike-contact-opacity": 0,
                 "--bike-debug-opacity": 0,
               }}
               data-reflection-instance="shared-animation-timeline"
             />
-          </g>
+          </g>}
 
           <g className="stage-content" transform={`translate(0 ${groundAlignment.stageTranslateY})`}>
-            <BikeLayer
-              data={data}
-              projector={project}
-              showSkeleton={IS_DEVELOPMENT && showSkeleton}
-              showFigmaAnchors={IS_DEVELOPMENT && showFigmaAnchors}
-              componentSetup={componentSetup}
-              motionStopped={isMotionStopped}
-            />
+            {renderModels.map((model) => {
+              const isPrimary = model.bike.id === primaryModel.bike.id;
+              return (
+                <BikeRenderer
+                  key={model.bike.id}
+                  model={model}
+                  projector={project}
+                  showSkeleton={IS_DEVELOPMENT && showSkeleton && isPrimary}
+                  showFigmaAnchors={IS_DEVELOPMENT && showFigmaAnchors && isPrimary}
+                  motionStopped={isMotionStopped}
+                  opacity={isPrimary ? 1 : 0.28}
+                  isPrimary={isPrimary}
+                  frameOnly={frameOnly}
+                />
+              );
+            })}
+
+            {geometryImportMode && (
+              <g className="geometry-preview-references" aria-label="几何参考点">
+                <GeometryPreviewReference point={data.frame.bb} label="BB" project={project} />
+                <GeometryPreviewReference point={data.frame.rearAxle} label="Rear Axle" project={project} />
+                <GeometryPreviewReference point={data.frame.frontAxle} label="Front Axle" project={project} />
+              </g>
+            )}
 
             {showDimensions && (
               <g className="dimensions">
@@ -202,7 +292,7 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
                 />
               </g>
             )}
-            {IS_DEVELOPMENT && (
+            {IS_DEVELOPMENT && !geometryImportMode && (
               <g className="bb-origin">
                 <circle cx="430" cy="420" r="4" />
                 <line x1="408" y1="420" x2="422" y2="420" />
@@ -214,9 +304,17 @@ export function BikeVisualizer({ bike, fit, componentSetup, isStageFullscreen, o
         </svg>
         <div className="canvas-tools" aria-label="画布显示控制">
           <Switch label="显示尺寸" checked={showDimensions} onChange={setShowDimensions} />
-          <Switch label="停止动画" checked={isMotionStopped} onChange={setIsMotionStopped} />
+          {!geometryImportMode && <Switch label="停止动画" checked={isMotionStopped} onChange={setIsMotionStopped} />}
         </div>
       </div>
+      {!geometryImportMode && (
+        <FullscreenGeometrySummary
+          bikes={bikes}
+          activeBikeIndex={activeBikeIndex}
+          compareEnabled={compareEnabled}
+          visible={isStageFullscreen}
+        />
+      )}
     </section>
   );
 }
