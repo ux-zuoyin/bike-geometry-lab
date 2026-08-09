@@ -31,6 +31,7 @@ const getBikeVisualSourceId = (bikeId) => `bike-visual-source-${bikeId}`;
 
 function useBikeRenderModel(bike) {
   return useMemo(() => {
+    if (!bike) return null;
     const fit = toGeometryFit(bike.fitSetup);
     return {
       bike,
@@ -81,6 +82,8 @@ export function BikeVisualizer({
   stagePreviewBike,
   frameOnly = false,
   geometryImportMode = false,
+  geometryImportPreviewReady = false,
+  geometryImportPreviewIssues = [],
   compareEnabled,
   onActiveBikeChange,
   onCompareEnabledChange,
@@ -100,24 +103,28 @@ export function BikeVisualizer({
     width: BIKE_STAGE_VIEWBOX_WIDTH,
     height: BIKE_STAGE_VIEWBOX_HEIGHT,
   });
-  const renderBikes = stagePreviewBike ? [stagePreviewBike] : (bikes.length ? bikes : [demoBike]);
+  const renderBikes = stagePreviewBike
+    ? [stagePreviewBike]
+    : (geometryImportMode ? [] : (bikes.length ? bikes : [demoBike]));
   const safeActiveIndex = activeBikeIndex != null && renderBikes[activeBikeIndex] ? activeBikeIndex : 0;
   const firstModel = useBikeRenderModel(renderBikes[0]);
   const secondModel = useBikeRenderModel(renderBikes[1] ?? renderBikes[0]);
   const renderModelList = [firstModel, secondModel];
   const primaryModel = renderModelList[safeActiveIndex];
   const secondaryModel = renderModelList[safeActiveIndex === 0 ? 1 : 0];
-  const isComparisonVisible = bikes.length === 2 && compareEnabled;
+  const hasRenderablePreview = Boolean(primaryModel);
+  const isComparisonVisible = hasRenderablePreview && bikes.length === 2 && compareEnabled;
   const renderModels = isComparisonVisible ? [secondaryModel, primaryModel] : [primaryModel];
-  const { bike, data } = primaryModel;
-  const primarySourceId = getBikeVisualSourceId(bike.id);
+  const bike = primaryModel?.bike ?? null;
+  const data = primaryModel?.data ?? null;
+  const primarySourceId = bike ? getBikeVisualSourceId(bike.id) : "";
   const project = useMemo(() => createProjector(), []);
-  const wheelbaseY = bike.geometry.bbDrop - WHEEL_RADIUS - 44;
-  const rearAxle = project(data.frame.rearAxle);
-  const frontAxle = project(data.frame.frontAxle);
+  const wheelbaseY = bike ? bike.geometry.bbDrop - WHEEL_RADIUS - 44 : 0;
+  const rearAxle = data ? project(data.frame.rearAxle) : null;
+  const frontAxle = data ? project(data.frame.frontAxle) : null;
   const wheelOuterRadius = RENDERED_WHEEL_DIAMETER_PX / 2;
-  const bikeGroundY = rearAxle.y + wheelOuterRadius;
-  const frontWheelBottomY = frontAxle.y + wheelOuterRadius;
+  const bikeGroundY = rearAxle ? rearAxle.y + wheelOuterRadius : 0;
+  const frontWheelBottomY = frontAxle ? frontAxle.y + wheelOuterRadius : 0;
   const groundAlignment = getBikeStageGroundAlignment({
     bikeGroundY,
     stageWidth: stageSize.width,
@@ -131,6 +138,10 @@ export function BikeVisualizer({
     `translate(0 ${-groundAlignment.stageGroundY})`,
     `translate(0 ${groundAlignment.stageTranslateY})`,
   ].join(" ");
+  const previewIssueLabels = geometryImportPreviewIssues.map(({ label }) => label);
+  const previewIncompleteMessage = previewIssueLabels.length > 0 && previewIssueLabels.length <= 3
+    ? `补充 ${previewIssueLabels.join("、")} 后将自动生成预览。`
+    : "补充关键几何数据后将自动生成预览。";
 
   useEffect(() => {
     const stage = canvasWrapRef.current;
@@ -164,7 +175,9 @@ export function BikeVisualizer({
         {geometryImportMode ? (
           <div className="geometry-preview-heading" aria-label="Geometry Import Mode">
             <strong>Geometry Preview</strong>
-            <span>仅预览 Frame + Fork · 修改参数后实时更新</span>
+            <span>{geometryImportPreviewReady
+              ? "仅预览 Frame + Fork · 修改参数后实时更新"
+              : "部分几何数据需要确认，预览暂未完全生成。"}</span>
           </div>
         ) : (
           <DualBikeControls
@@ -194,12 +207,12 @@ export function BikeVisualizer({
           ref={canvasRef}
           viewBox="0 0 980 620"
           role="img"
-          aria-label={`${bike.brand} ${bike.model} ${bike.size} 自行车几何图`}
+          aria-label={bike ? `${bike.brand} ${bike.model} ${bike.size} 自行车几何图` : "几何数据待补充"}
           data-motion-stopped={isMotionStopped}
           data-reference-wheel-diameter-mm={REFERENCE_WHEEL_OUTER_DIAMETER_MM}
           data-rendered-wheel-diameter-px={RENDERED_WHEEL_DIAMETER_PX}
           data-pixels-per-mm={PIXELS_PER_MM.toFixed(9)}
-          data-wheelbase-wheel-ratio={(bike.geometry.wheelbase / REFERENCE_WHEEL_OUTER_DIAMETER_MM).toFixed(6)}
+          data-wheelbase-wheel-ratio={bike ? (bike.geometry.wheelbase / REFERENCE_WHEEL_OUTER_DIAMETER_MM).toFixed(6) : undefined}
           data-stage-ground-y={groundAlignment.stageGroundY.toFixed(3)}
           data-stage-ground-y-px={groundAlignment.stageGroundYPx.toFixed(3)}
           data-bike-ground-y={bikeGroundY.toFixed(3)}
@@ -209,7 +222,7 @@ export function BikeVisualizer({
           data-reflection-scale-y="-1"
           data-reflection-gap-px={REFLECTION_GAP_PX}
         >
-          {!geometryImportMode && <g
+          {!geometryImportMode && hasRenderablePreview && <g
             className="bike-reflection"
             aria-hidden="true"
             opacity={REFLECTION_OPACITY}
@@ -227,7 +240,7 @@ export function BikeVisualizer({
             />
           </g>}
 
-          <g className="stage-content" transform={`translate(0 ${groundAlignment.stageTranslateY})`}>
+          {hasRenderablePreview && <g className="stage-content" transform={`translate(0 ${groundAlignment.stageTranslateY})`}>
             {renderModels.map((model) => {
               const isPrimary = model.bike.id === primaryModel.bike.id;
               return (
@@ -300,12 +313,16 @@ export function BikeVisualizer({
                 <text x="400" y="449">BB 0,0</text>
               </g>
             )}
-          </g>
+          </g>}
         </svg>
-        <div className="canvas-tools" aria-label="画布显示控制">
+        {geometryImportMode && !hasRenderablePreview && <div className="geometry-preview-empty" role="status">
+          <strong>部分几何数据需要确认</strong>
+          <span>{previewIncompleteMessage}</span>
+        </div>}
+        {hasRenderablePreview && <div className="canvas-tools" aria-label="画布显示控制">
           <Switch label="显示尺寸" checked={showDimensions} onChange={setShowDimensions} />
           {!geometryImportMode && <Switch label="停止动画" checked={isMotionStopped} onChange={setIsMotionStopped} />}
-        </div>
+        </div>}
       </div>
       {!geometryImportMode && (
         <FullscreenGeometrySummary

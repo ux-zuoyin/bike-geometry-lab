@@ -1,6 +1,7 @@
 import {
   GEOMETRY_PARSER_FIELDS,
   GEOMETRY_PARSER_FIELD_KEYS,
+  GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
   GEOMETRY_PARSER_SCHEMA_VERSION,
 } from "./geometryParserSchema.js";
 
@@ -11,12 +12,18 @@ const fieldLabels = Object.fromEntries(
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const toSize = (value) => String(value ?? "").trim();
 
-function warning(code, message, field = null, size = null) {
-  return { code, message, field, size };
+function warning(code, message, field = null, size = null, value) {
+  return {
+    code,
+    message,
+    field,
+    size,
+    ...(value === undefined ? {} : { value }),
+  };
 }
 
 function warningIdentity(item) {
-  return [item.code, item.field ?? "", item.size ?? "", item.message].join("|");
+  return [item.code, item.field ?? "", item.size ?? "", item.value ?? "", item.message].join("|");
 }
 
 function appendWarning(target, seen, item) {
@@ -46,6 +53,30 @@ function sanitizeUnrecognizedFields(value) {
     return [{
       sourceLabel: String(item.sourceLabel ?? "").trim(),
       reason: String(item.reason ?? "").trim(),
+      unit: item.unit == null || item.unit === "" ? null : String(item.unit).trim(),
+      values: Array.isArray(item.values)
+        ? item.values.map((cell) => {
+          const numericValue = cell == null || cell === "" ? null : Number(cell);
+          return Number.isFinite(numericValue) ? numericValue : null;
+        })
+        : [],
+    }];
+  });
+}
+
+function sanitizeRawRows(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item) || !String(item.label ?? "").trim()) return [];
+    return [{
+      label: String(item.label).trim(),
+      unit: item.unit == null || item.unit === "" ? null : String(item.unit).trim(),
+      values: Array.isArray(item.values)
+        ? item.values.map((cell) => {
+          const numericValue = cell == null || cell === "" ? null : Number(cell);
+          return Number.isFinite(numericValue) ? numericValue : null;
+        })
+        : [],
     }];
   });
 }
@@ -163,6 +194,21 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
             size,
           ),
         );
+      } else {
+        const range = GEOMETRY_PARSER_PLAUSIBILITY_RANGES[field];
+        if (range && (value < range.min || value > range.max)) {
+          appendWarning(
+            warnings,
+            seenWarnings,
+            warning(
+              "GEOMETRY_VALUE_OUT_OF_RANGE",
+              `${size} 尺码的 ${fieldLabels[field]} 识别为 ${value} ${range.unit}，数值明显异常，请核对。`,
+              field,
+              size,
+              value,
+            ),
+          );
+        }
       }
       return [field, value];
     }));
@@ -203,7 +249,9 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
   }
 
   const confirmationCount = warnings.filter(({ code }) => (
-    code === "CELL_UNRECOGNIZED" || code === "SIZE_COLUMN_MISSING"
+    code === "CELL_UNRECOGNIZED"
+    || code === "SIZE_COLUMN_MISSING"
+    || code === "GEOMETRY_VALUE_OUT_OF_RANGE"
   )).length;
 
   return {
@@ -215,6 +263,6 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
     warnings,
     confirmationCount,
     unrecognizedFields: sanitizeUnrecognizedFields(rawResponse.unrecognizedFields),
+    rawRows: sanitizeRawRows(rawResponse.rawRows),
   };
 }
-

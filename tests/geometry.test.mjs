@@ -82,9 +82,15 @@ import {
 import { getSTRProfile } from "../src/lib/geometry/strProfile.js";
 import {
   addGeometryImportDraftSize,
+  CORE_GEOMETRY_FIELD_KEYS,
   GEOMETRY_IMPORT_FIELDS,
   GEOMETRY_IMPORT_STATUSES,
+  getGeometryImportPreviewIssues,
   importGeometryToSizeData,
+  isGeometryImportPreviewSafe,
+  resolveGeometryImportPreview,
+  STRUCTURAL_GEOMETRY_FIELD_KEYS,
+  toggleGeometryImportSize,
   updateGeometryImportDraftField,
   validateGeometryImportDraft,
 } from "../src/state/geometryImportState.js";
@@ -817,7 +823,9 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
 
   const draft = createMockGeometryImportDraft();
   const secondDraft = createMockGeometryImportDraft();
-  assert.deepEqual(Object.keys(draft.sizes), ["49", "52", "54", "56"]);
+  assert.deepEqual(Object.keys(draft.sizes), ["54"]);
+  assert.deepEqual(Object.keys(draft.candidateSizes), ["49", "52", "54", "56"]);
+  assert.deepEqual(draft.selectedImportSizes, ["54"]);
   assert.equal(draft.selectedSize, "54");
   assert.equal(draft.category, "endurance");
   assert.equal(draft.brand, "");
@@ -830,32 +838,50 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   const identified = { ...edited, brand: "Quick", model: "Zeitpro" };
   assert.equal(validateGeometryImportDraft(identified).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, model: "" }).isValid, true);
-  const invalid = updateGeometryImportDraftField(identified, "49", "headTubeAngle", "92");
+  const withAdjacentSize = toggleGeometryImportSize(identified, "49");
+  assert.deepEqual(withAdjacentSize.selectedImportSizes, ["54", "49"]);
+  assert.equal(withAdjacentSize.selectedSize, "49");
+  const invalid = updateGeometryImportDraftField(withAdjacentSize, "49", "headTubeAngle", "92");
   assert.equal(validateGeometryImportDraft(invalid).firstInvalidSize, "49");
   assert.equal(validateGeometryImportDraft({ ...invalid, brand: "" }).firstErrorKey, "brand");
   assert.equal(validateGeometryImportDraft({ ...invalid, brand: "" }).firstInvalidSize, null);
   assert.equal(validateGeometryImportDraft(invalid).firstErrorKey, "sizes.49.headTubeAngle");
-  const missingOptional = updateGeometryImportDraftField(identified, "54", "forkOffset", "");
-  assert.equal(validateGeometryImportDraft(missingOptional).isValid, true);
+  const missingForkOffset = updateGeometryImportDraftField(identified, "54", "forkOffset", "");
+  assert.equal(validateGeometryImportDraft(missingForkOffset).isValid, true);
 
-  const sizeData = importGeometryToSizeData("54", missingOptional.sizes[54]);
+  const sizeData = importGeometryToSizeData("54", missingForkOffset.sizes[54]);
   assert.equal(sizeData.stackMm, 582);
   assert.equal(sizeData.reachMm, 374);
-  assert.equal(sizeData.forkOffsetMm, null);
+  assert.notEqual(sizeData.forkOffsetMm, null);
+  assert.equal(sizeData.geometrySources.forkOffset, "estimated");
+  assert.equal(sizeData.geometryCompleteness, "approximate");
   assert.equal(sizeData.trailMm, null);
   assert.equal(sizeData.standoverMm, null);
 
   const originalBike = createComparisonBike("A", createDefaultBikeSetup());
-  const importedBike = createBikeFromGeometryImport(originalBike, missingOptional);
+  const importedBike = createBikeFromGeometryImport(originalBike, missingForkOffset);
   assert.equal(importedBike.brand, "Quick");
   assert.equal(importedBike.model, "Zeitpro");
   assert.equal(importedBike.category, "endurance");
   assert.equal(importedBike.isPreset, false);
-  assert.deepEqual(importedBike.sizes, ["49", "52", "54", "56"]);
+  assert.deepEqual(importedBike.sizes, ["54"]);
+  assert.deepEqual(Object.keys(importedBike.importSource.candidateSizes), ["49", "52", "54", "56"]);
+  assert.deepEqual(importedBike.importSource.selectedImportSizes, ["54"]);
   assert.equal(importedBike.geometry.stack, 582);
   assert.deepEqual(importedBike.fitSetup, originalBike.fitSetup);
   assert.deepEqual(importedBike.componentSetup, originalBike.componentSetup);
-  assert.equal(updateBikeSize(importedBike, "49").geometry.stack, 540);
+  assert.strictEqual(updateBikeSize(importedBike, "49"), importedBike);
+  assert.deepEqual(CORE_GEOMETRY_FIELD_KEYS, ["stack", "reach", "seatTubeAngle", "headTubeAngle"]);
+  assert.deepEqual(STRUCTURAL_GEOMETRY_FIELD_KEYS, ["effectiveTopTube", "seatTubeLength", "headTubeLength", "chainstay", "wheelbase", "bbDrop", "forkOffset"]);
+  const missingPreviewFields = updateGeometryImportDraftField(missingForkOffset, "54", "wheelbase", "");
+  assert.equal(isGeometryImportPreviewSafe(missingPreviewFields.sizes[54]), true);
+  assert.deepEqual(getGeometryImportPreviewIssues(missingPreviewFields.sizes[54]), []);
+  const derivedWheelbase = resolveGeometryImportPreview(updateGeometryImportDraftField(identified, "54", "wheelbase", "").sizes[54]);
+  assert.equal(derivedWheelbase.geometrySources.wheelbase, "derived");
+  assert.equal(derivedWheelbase.geometryCompleteness, "derived");
+  const missingCore = updateGeometryImportDraftField(identified, "54", "stack", "");
+  assert.equal(isGeometryImportPreviewSafe(missingCore.sizes[54]), false);
+  assert.equal(validateGeometryImportDraft(missingCore).firstErrorKey, "sizes.54.stack");
   const supplemented = addGeometryImportDraftSize(identified, "58");
   assert.equal(supplemented.selectedSize, "58");
   assert.equal(supplemented.sizes[58].stack, null);
@@ -887,7 +913,7 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.match(geometryImportFlowSource, /data-validation-key=\{errorKey\}[\s\S]*aria-describedby=\{error \? errorId/);
   assert.match(geometryImportFlowSource, /scrollContainer\.scrollTo\(\{[\s\S]*behavior: "smooth"/);
   assert.match(geometryImportFlowSource, /target\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(geometryImportFlowSource, /message: `还有 \$\{validation\?\.errorCount \?\? 1\} 项信息需要修正`/);
+  assert.match(geometryImportFlowSource, /message: `还有 \$\{validation\?\.errorCount \?\? 1\} 项关键几何数据需要补充`/);
   assert.match(stylesSource, /input\[aria-invalid="true"\]:focus\s*\{[^}]*status-error/);
   assert.match(bikeVisualizerSource, /showContactPoints=\{!frameOnly\}[\s\S]*frameOnly=\{frameOnly\}/);
   assert.match(enduranceTemplateSource, /\{!frameOnly && <>[\s\S]*renderLayer="non-drive-crank"[\s\S]*data-render-layer="cockpit"[\s\S]*<TemplateAsset asset=\{forkAsset\}/);
@@ -899,7 +925,10 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.match(appSource, /activeBikeIndex=\{isGeometryImportActive \? null : activeBikeIndex\}/);
   assert.match(appSource, /isStageFullscreen=\{isStageFullscreen \|\| isGeometryImportActive\}/);
   assert.match(bikeVisualizerSource, /geometryImportMode \? \([\s\S]*Geometry Preview[\s\S]*<DualBikeControls/);
-  assert.match(bikeVisualizerSource, /\{!geometryImportMode && <g[\s\S]*className="bike-reflection"/);
+  assert.match(appSource, /const importPreviewSourceBike = isGeometryImportActive && draftPreviewValid[\s\S]*: null;/);
+  assert.match(bikeVisualizerSource, /geometryImportMode \? \[\] : \(bikes\.length \? bikes : \[demoBike\]\)/);
+  assert.match(bikeVisualizerSource, /geometry-preview-empty[\s\S]*部分几何数据需要确认[\s\S]*previewIncompleteMessage/);
+  assert.match(bikeVisualizerSource, /\{!geometryImportMode && hasRenderablePreview && <g[\s\S]*className="bike-reflection"/);
   assert.match(bikeVisualizerSource, /GeometryPreviewReference point=\{data\.frame\.bb\} label="BB"[\s\S]*label="Rear Axle"[\s\S]*label="Front Axle"/);
   assert.match(bikeVisualizerSource, /!geometryImportMode && <Switch label="停止动画"/);
   assert.match(stylesSource, /\.workspace\.workspace--geometry-import\s*\{[^}]*grid-template-columns:\s*360px minmax\(0, 1fr\) 0;/s);
@@ -1126,8 +1155,8 @@ test("Bike Stage aligns both 700C wheel contact points to one responsive Prism g
   }
 
   assert.match(bikeVisualizerSource, /new ResizeObserver\(updateStageSize\)/);
-  assert.match(bikeVisualizerSource, /const bikeGroundY = rearAxle\.y \+ wheelOuterRadius/);
-  assert.match(bikeVisualizerSource, /<g className="stage-content" transform=\{`translate\(0 \$\{groundAlignment\.stageTranslateY\}\)`\}>/);
+  assert.match(bikeVisualizerSource, /const bikeGroundY = rearAxle \? rearAxle\.y \+ wheelOuterRadius : 0/);
+  assert.match(bikeVisualizerSource, /\{hasRenderablePreview && <g className="stage-content" transform=\{`translate\(0 \$\{groundAlignment\.stageTranslateY\}\)`\}>/);
   assert.match(bikeVisualizerSource, /className="stage-content"[\s\S]*<BikeRenderer[\s\S]*className="dimensions"[\s\S]*className="bb-origin"/);
   assert.doesNotMatch(bikeVisualizerSource, /getBBox\(|FrontWheel translateY|RearWheel translateY/);
   assert.match(stylesSource, /\.bike-canvas\s*\{[^}]*overflow:\s*visible;/);

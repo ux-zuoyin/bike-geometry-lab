@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle, ImageSquare, Plus, SpinnerGap, UploadSimple, WarningCircle } from "@phosphor-icons/react";
+import { CheckCircle, ImageSquare, Info, Plus, SpinnerGap, UploadSimple, WarningCircle } from "@phosphor-icons/react";
 import { GEOMETRY_IMPORT_FIELDS } from "../../state/geometryImportState.js";
 
 const ACCEPTED_IMAGE_TYPES = ".png,.jpg,.jpeg,image/png,image/jpeg";
@@ -53,13 +53,14 @@ function AnalyzingState({ image, onSelectImage, onCancel }) {
   );
 }
 
-function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onAddSize, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
   const [newSize, setNewSize] = useState("");
   const [submitFeedback, setSubmitFeedback] = useState(null);
   const [errorNavigation, setErrorNavigation] = useState(null);
   const formRef = useRef(null);
   const submitAttemptRef = useRef(0);
-  const sizes = Object.keys(draft.sizes);
+  const sizes = draft.selectedImportSizes?.filter((size) => draft.sizes[String(size)]) ?? Object.keys(draft.sizes);
+  const candidateSizes = draft.detectedSizes?.map(String) ?? Object.keys(draft.candidateSizes ?? draft.sizes);
   const selectedGeometry = draft.sizes[draft.selectedSize] ?? {};
   const parserWarnings = Array.isArray(draft.parserWarnings) ? draft.parserWarnings : [];
   const detectedSizeCount = draft.detectedSizeCount ?? sizes.length;
@@ -100,7 +101,7 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
     const validation = onConfirm();
     if (!validation?.isValid) {
       submitAttemptRef.current += 1;
-      setSubmitFeedback({ message: `还有 ${validation?.errorCount ?? 1} 项信息需要修正`, attempt: submitAttemptRef.current });
+      setSubmitFeedback({ message: `还有 ${validation?.errorCount ?? 1} 项关键几何数据需要补充`, attempt: submitAttemptRef.current });
       setErrorNavigation({ key: validation?.firstErrorKey, attempt: submitAttemptRef.current });
     }
   };
@@ -126,10 +127,11 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
         </div>
       </section>
       <section className="geometry-import__block">
-        <div className="geometry-import__review-title"><div><h3>已识别尺码</h3><span>AI 可能遗漏尺码，可手动补充</span></div><span>{sizes.length} 个</span></div>
-        <div className="geometry-import__sizes" role="group" aria-label="已识别尺码">
-          {sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} onClick={() => onSelectSize(size)}>{size}</button>)}
+        <div className="geometry-import__review-title"><div><h3>你想导入哪些尺码？</h3><span>默认选择一个尺码；可按需添加相邻尺码</span></div><span>已选 {sizes.length} 个</span></div>
+        <div className="geometry-import__candidate-sizes" role="group" aria-label="可导入尺码">
+          {candidateSizes.map((size) => <button type="button" key={size} className={sizes.includes(size) ? "is-selected" : ""} aria-pressed={sizes.includes(size)} title={size} onClick={() => onToggleImportSize(size)}>{size}</button>)}
         </div>
+        {sizes.length > 1 && <div className="geometry-import__selected-sizes" role="group" aria-label="当前校对尺码">{sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} title={size} onClick={() => onSelectSize(size)}>{size}</button>)}</div>}
         <div className="geometry-import__add-size"><input data-validation-key="sizes" type="text" inputMode="decimal" value={newSize} aria-label="补充尺码" placeholder="输入尺码，例如 58" aria-invalid={Boolean(errors.sizes)} aria-describedby={errors.sizes ? "geometry-import-sizes-error" : undefined} onChange={(event) => setNewSize(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSize(); } }} /><button type="button" onClick={addSize}><Plus size={16} />补充尺码</button></div>
         {errors.sizes && <p id="geometry-import-sizes-error" className="geometry-import__inline-error" role="alert">{errors.sizes}</p>}
       </section>
@@ -138,10 +140,19 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
         <div className="geometry-import__field-list">
           {GEOMETRY_IMPORT_FIELDS.map((field) => {
             const errorKey = `sizes.${draft.selectedSize}.${field.key}`;
-            const error = errors[errorKey];
+            const parserRangeWarning = parserWarnings.find((warning) => (
+              warning.code === "GEOMETRY_VALUE_OUT_OF_RANGE"
+              && warning.size === draft.selectedSize
+              && warning.field === field.key
+            ));
+            const error = errors[errorKey] || (parserRangeWarning
+              ? "识别结果可能发生串列，请核对原图。"
+              : null);
             const value = selectedGeometry[field.key];
             const errorId = `geometry-import-${draft.selectedSize}-${field.key}-error`;
-            return <label key={field.key} className={error ? "has-error" : ""}><span><strong>{field.label}</strong>{!field.required && value == null && <small>未识别</small>}</span><span className="geometry-import__number-input"><input data-validation-key={errorKey} type="number" step={field.unit === "°" ? "0.1" : "1"} value={value ?? ""} placeholder="未识别" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => onGeometryFieldChange(field.key, event.target.value)} /><small>{field.unit}</small></span>{error && <em id={errorId} role="alert">{error}</em>}</label>;
+            const inputId = `geometry-import-${draft.selectedSize}-${field.key}`;
+            const tooltipId = `${inputId}-tooltip`;
+            return <div key={field.key} className={`geometry-import__field-row${error ? " has-error" : ""}`}><span className="geometry-import__field-name"><label htmlFor={inputId}><strong>{field.label}</strong><span className="geometry-import__field-translation">{field.reviewLabel}</span>{!field.required && value == null && <small>未识别</small>}</label>{field.tooltip && <span className="geometry-import__field-tooltip"><button type="button" aria-label={`查看 ${field.label} 术语说明`} aria-describedby={tooltipId}><Info size={14} weight="regular" aria-hidden="true" /></button><span id={tooltipId} role="tooltip">{field.tooltip}</span></span>}</span><span className="geometry-import__number-input"><input id={inputId} data-validation-key={errorKey} type="number" step={field.unit === "°" ? "0.1" : "1"} value={value ?? ""} placeholder="未识别" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => onGeometryFieldChange(field.key, event.target.value)} /><small>{field.unit}</small></span>{error && <em id={errorId} role="alert">{error}</em>}</div>;
           })}
         </div>
       </section>
@@ -161,8 +172,8 @@ function ErrorState({ message, image, onSelectImage, onReanalyze, onCancel }) {
   return <div className="geometry-import geometry-import--error"><section className="geometry-import__block"><WarningCircle size={30} weight="regular" aria-hidden="true" /><h3>AI 暂时无法提取这张图片</h3><p>{message}</p><div className="geometry-import__error-actions">{image && onReanalyze && <button type="button" className="geometry-import__secondary" onClick={onReanalyze}>重新识别</button>}<GeometryImagePicker compact label="重新上传图片" onSelectImage={onSelectImage} />{onCancel && <button type="button" className="geometry-import__cancel" onClick={onCancel}>取消</button>}</div></section></div>;
 }
 
-export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onAddSize, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
   if (status === "analyzing" && image) return <AnalyzingState image={image} onSelectImage={onSelectImage} onCancel={onCancel} />;
-  if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onAddSize={onAddSize} onGeometryFieldChange={onGeometryFieldChange} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
+  if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onToggleImportSize={onToggleImportSize} onAddSize={onAddSize} onGeometryFieldChange={onGeometryFieldChange} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
   return <ErrorState message={errorMessage} image={image} onSelectImage={onSelectImage} onReanalyze={onReanalyze} onCancel={onCancel} />;
 }

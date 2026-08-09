@@ -3,7 +3,7 @@ import {
   toBikeGeometry,
   trekDomane,
 } from "../data/bikes.js";
-import { importGeometryToSizeData } from "./geometryImportState.js";
+import { getSelectedImportSizes, importGeometryToSizeData } from "./geometryImportState.js";
 
 export const ACTIVE_BIKES = Object.freeze(["a", "b"]);
 
@@ -66,7 +66,7 @@ export function createComparisonBike(id, setup, size = trekDomane.visualBaseSize
 }
 
 export function updateBikeSize(bike, size) {
-  const sizeData = bike.geometryBySize?.[String(size)] ?? getTrekDomaneSize(size);
+  const sizeData = bike.geometryBySize?.[String(size)] ?? (bike.source === "preset" ? getTrekDomaneSize(size) : null);
   if (!sizeData) return bike;
 
   const clonedSizeData = { ...sizeData };
@@ -75,17 +75,20 @@ export function updateBikeSize(bike, size) {
     size: String(size),
     sizeData: clonedSizeData,
     geometry: { ...toBikeGeometry(clonedSizeData) },
+    geometrySources: clonedSizeData.geometrySources ? { ...clonedSizeData.geometrySources } : undefined,
+    geometryCompleteness: clonedSizeData.geometryCompleteness ?? undefined,
   };
 }
 
 export function createBikeFromGeometryImport(currentBike, draft, geometryImage = currentBike.geometryImage ?? null) {
+  const selectedImportSizes = getSelectedImportSizes(draft);
   const geometryBySize = Object.fromEntries(
-    Object.entries(draft.sizes).map(([size, geometry]) => [
+    selectedImportSizes.map((size) => [
       String(size),
-      importGeometryToSizeData(size, geometry),
+      importGeometryToSizeData(size, draft.sizes?.[size] ?? draft.candidateSizes?.[size]),
     ]),
   );
-  const sizes = Object.keys(geometryBySize);
+  const sizes = [...selectedImportSizes];
   const selectedSize = geometryBySize[draft.selectedSize] ? draft.selectedSize : sizes[0];
   const sizeData = { ...geometryBySize[selectedSize] };
 
@@ -93,6 +96,16 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
     ...currentBike,
     source: "upload",
     geometryImage,
+    importSource: {
+      detectedSizes: [...(draft.detectedSizes ?? Object.keys(draft.candidateSizes ?? draft.sizes ?? {}))],
+      detectedSizeCount: draft.detectedSizeCount ?? Object.keys(draft.candidateSizes ?? draft.sizes ?? {}).length,
+      selectedImportSizes: [...selectedImportSizes],
+      candidateSizes: Object.fromEntries(Object.entries(draft.candidateSizes ?? draft.sizes ?? {}).map(([size, geometry]) => [size, { ...geometry }])),
+      rawRows: (draft.rawRows ?? []).map((row) => ({ ...row, values: [...(row.values ?? [])] })),
+      parserWarnings: [...(draft.allParserWarnings ?? draft.parserWarnings ?? [])],
+      unrecognizedFields: (draft.unrecognizedFields ?? []).map((field) => ({ ...field, values: [...(field.values ?? [])] })),
+      parserMeta: draft.parserMeta ? { ...draft.parserMeta } : null,
+    },
     brand: draft.brand.trim(),
     model: draft.model.trim() || "未命名车型",
     category: "endurance",
@@ -104,6 +117,8 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
     size: String(selectedSize),
     sizeData,
     geometry: { ...toBikeGeometry(sizeData) },
+    geometrySources: sizeData.geometrySources ? { ...sizeData.geometrySources } : {},
+    geometryCompleteness: sizeData.geometryCompleteness ?? "exact",
   };
 }
 

@@ -1,3 +1,6 @@
+import { GEOMETRY_PARSER_PLAUSIBILITY_RANGES } from "../services/geometryParserSchema.js";
+import { ENDURANCE_VISUAL_BASE_GEOMETRY } from "../data/enduranceGeometry.js";
+
 export const GEOMETRY_IMPORT_STATUSES = Object.freeze([
   "analyzing",
   "review",
@@ -6,18 +9,170 @@ export const GEOMETRY_IMPORT_STATUSES = Object.freeze([
 ]);
 
 export const GEOMETRY_IMPORT_FIELDS = Object.freeze([
-  { key: "stack", label: "Stack", unit: "mm", required: true, min: 1, max: 900 },
-  { key: "reach", label: "Reach", unit: "mm", required: true, min: 1, max: 700 },
-  { key: "effectiveTopTube", label: "Effective Top Tube", unit: "mm", required: false, min: 1, max: 800 },
-  { key: "seatTubeLength", label: "Seat Tube", unit: "mm", required: true, min: 1, max: 900 },
-  { key: "seatTubeAngle", label: "Seat Tube Angle", unit: "°", required: true, min: 60, max: 85 },
-  { key: "headTubeLength", label: "Head Tube", unit: "mm", required: true, min: 1, max: 400 },
-  { key: "headTubeAngle", label: "Head Tube Angle", unit: "°", required: true, min: 60, max: 85 },
-  { key: "chainstay", label: "Chainstay", unit: "mm", required: true, min: 1, max: 700 },
-  { key: "wheelbase", label: "Wheelbase", unit: "mm", required: true, min: 1, max: 1500 },
-  { key: "bbDrop", label: "BB Drop", unit: "mm", required: true, min: 1, max: 150 },
-  { key: "forkOffset", label: "Fork Offset", unit: "mm", required: false, min: 1, max: 120 },
+  { key: "stack", label: "Stack", reviewLabel: "堆高", required: true, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.stack },
+  { key: "reach", label: "Reach", reviewLabel: "前伸量", required: true, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.reach },
+  { key: "effectiveTopTube", label: "Effective Top Tube", reviewLabel: "有效上管", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.effectiveTopTube },
+  { key: "seatTubeLength", label: "Seat Tube", reviewLabel: "座管长度", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.seatTubeLength },
+  { key: "seatTubeAngle", label: "Seat Tube Angle", reviewLabel: "座管角", required: true, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.seatTubeAngle },
+  { key: "headTubeLength", label: "Head Tube", reviewLabel: "头管长度", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.headTubeLength },
+  { key: "headTubeAngle", label: "Head Tube Angle", reviewLabel: "头管角", required: true, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.headTubeAngle },
+  { key: "chainstay", label: "Chainstay", reviewLabel: "后下叉长度", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.chainstay },
+  { key: "wheelbase", label: "Wheelbase", reviewLabel: "轴距", tooltip: "轴距，部分中文几何表也写作轮轴距", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.wheelbase },
+  { key: "bbDrop", label: "BB Drop", reviewLabel: "五通下沉", tooltip: "五通下沉，部分几何表也称中轴下沉量", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.bbDrop },
+  { key: "forkOffset", label: "Fork Offset", reviewLabel: "前叉偏移", tooltip: "前叉偏移，部分品牌也称前叉调节量 / Fork Rake", required: false, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.forkOffset },
 ]);
+
+export const CORE_GEOMETRY_FIELD_KEYS = Object.freeze(
+  GEOMETRY_IMPORT_FIELDS.filter(({ required }) => required).map(({ key }) => key),
+);
+
+export const STRUCTURAL_GEOMETRY_FIELD_KEYS = Object.freeze(
+  GEOMETRY_IMPORT_FIELDS.filter(({ required }) => !required).map(({ key }) => key),
+);
+
+const fieldsByKey = Object.freeze(Object.fromEntries(
+  GEOMETRY_IMPORT_FIELDS.map((field) => [field.key, field]),
+));
+
+const toSize = (value) => String(value ?? "").trim();
+const cloneGeometry = (geometry) => ({ ...geometry });
+
+export function getSelectedImportSizes(draft) {
+  const candidateSizes = draft?.candidateSizes ?? draft?.sizes ?? {};
+  const candidateKeys = Object.keys(candidateSizes);
+  const requested = Array.isArray(draft?.selectedImportSizes)
+    ? draft.selectedImportSizes.map(toSize)
+    : [];
+  const selected = [...new Set(requested.filter((size) => candidateKeys.includes(size)))];
+  if (selected.length) return selected;
+  const selectedSize = toSize(draft?.selectedSize);
+  if (candidateKeys.includes(selectedSize)) return [selectedSize];
+  return candidateKeys[0] ? [candidateKeys[0]] : [];
+}
+
+export function scopeGeometryImportWarnings(warnings, selectedImportSizes) {
+  const selected = new Set((selectedImportSizes ?? []).map(toSize));
+  return Array.isArray(warnings)
+    ? warnings.filter((warning) => warning?.size != null && selected.has(toSize(warning.size)))
+    : [];
+}
+
+function applyImportSizeSelection(draft, selectedImportSizes) {
+  const candidateSizes = draft?.candidateSizes ?? draft?.sizes ?? {};
+  const selected = selectedImportSizes.filter((size) => candidateSizes[size]);
+  const sizes = Object.fromEntries(selected.map((size) => [size, cloneGeometry(candidateSizes[size])]));
+  const allParserWarnings = Array.isArray(draft?.allParserWarnings)
+    ? draft.allParserWarnings
+    : (draft?.parserWarnings ?? []);
+  const parserWarnings = scopeGeometryImportWarnings(allParserWarnings, selected);
+  return {
+    ...draft,
+    candidateSizes,
+    sizes,
+    selectedImportSizes: selected,
+    selectedSize: selected.includes(draft.selectedSize) ? draft.selectedSize : (selected[0] ?? ""),
+    allParserWarnings,
+    parserWarnings,
+    parserConfirmationCount: parserWarnings.filter((warning) => (
+      ["CELL_UNRECOGNIZED", "SIZE_COLUMN_MISSING", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)
+    )).length,
+  };
+}
+
+const TEMPLATE_GEOMETRY_DEFAULTS = Object.freeze({
+  stack: ENDURANCE_VISUAL_BASE_GEOMETRY.stack,
+  reach: ENDURANCE_VISUAL_BASE_GEOMETRY.reach,
+  effectiveTopTube: ENDURANCE_VISUAL_BASE_GEOMETRY.effectiveTopTube,
+  seatTubeLength: ENDURANCE_VISUAL_BASE_GEOMETRY.seatTube,
+  seatTubeAngle: ENDURANCE_VISUAL_BASE_GEOMETRY.seatAngle,
+  headTubeLength: ENDURANCE_VISUAL_BASE_GEOMETRY.headTube,
+  headTubeAngle: ENDURANCE_VISUAL_BASE_GEOMETRY.headAngle,
+  chainstay: ENDURANCE_VISUAL_BASE_GEOMETRY.chainstay,
+  wheelbase: ENDURANCE_VISUAL_BASE_GEOMETRY.wheelbase,
+  bbDrop: ENDURANCE_VISUAL_BASE_GEOMETRY.bbDrop,
+  forkOffset: ENDURANCE_VISUAL_BASE_GEOMETRY.forkRake,
+});
+
+export function isGeometryImportPreviewSafe(geometry) {
+  return getGeometryImportPreviewIssues(geometry).length === 0;
+}
+
+export function getGeometryImportPreviewIssues(geometry) {
+  return CORE_GEOMETRY_FIELD_KEYS.flatMap((key) => {
+    const field = fieldsByKey[key];
+    const value = geometry?.[field.key];
+    const error = value == null || value === ""
+      ? `${field.label} 不能为空`
+      : getGeometryImportFieldError(field, value);
+    return error ? [{ key: field.key, label: field.label, error }] : [];
+  });
+}
+
+function isOfficialGeometryValue(field, value) {
+  return value != null && value !== "" && getGeometryImportFieldError(field, value) == null;
+}
+
+function deriveWheelbase(resolved, sources) {
+  const inputKeys = ["reach", "chainstay", "bbDrop", "forkOffset"];
+  if (!inputKeys.every((key) => sources[key] === "official")) return null;
+  const rearProjection = Math.sqrt(Math.max(0, resolved.chainstay ** 2 - resolved.bbDrop ** 2));
+  const templateRearProjection = Math.sqrt(Math.max(
+    0,
+    TEMPLATE_GEOMETRY_DEFAULTS.chainstay ** 2 - TEMPLATE_GEOMETRY_DEFAULTS.bbDrop ** 2,
+  ));
+  const templateFrontCenter = TEMPLATE_GEOMETRY_DEFAULTS.wheelbase - templateRearProjection;
+  return rearProjection
+    + templateFrontCenter
+    + (resolved.reach - TEMPLATE_GEOMETRY_DEFAULTS.reach)
+    + (resolved.forkOffset - TEMPLATE_GEOMETRY_DEFAULTS.forkOffset);
+}
+
+export function resolveGeometryImportPreview(geometry) {
+  const issues = getGeometryImportPreviewIssues(geometry);
+  if (issues.length) {
+    return {
+      isValid: false,
+      issues,
+      geometry: null,
+      geometrySources: {},
+      geometryCompleteness: "incomplete",
+    };
+  }
+
+  const resolved = {};
+  const geometrySources = {};
+  for (const field of GEOMETRY_IMPORT_FIELDS) {
+    const value = geometry?.[field.key];
+    if (isOfficialGeometryValue(field, value)) {
+      resolved[field.key] = Number(value);
+      geometrySources[field.key] = "official";
+    } else {
+      resolved[field.key] = TEMPLATE_GEOMETRY_DEFAULTS[field.key];
+      geometrySources[field.key] = "estimated";
+    }
+  }
+
+  if (geometrySources.wheelbase === "estimated") {
+    const derivedWheelbase = deriveWheelbase(resolved, geometrySources);
+    if (derivedWheelbase != null && Number.isFinite(derivedWheelbase)) {
+      resolved.wheelbase = derivedWheelbase;
+      geometrySources.wheelbase = "derived";
+    }
+  }
+
+  const sourceValues = Object.values(geometrySources);
+  const geometryCompleteness = sourceValues.includes("estimated")
+    ? "approximate"
+    : (sourceValues.includes("derived") ? "derived" : "exact");
+
+  return {
+    isValid: true,
+    issues: [],
+    geometry: resolved,
+    geometrySources,
+    geometryCompleteness,
+  };
+}
 
 export function isSupportedGeometryImage(file) {
   if (typeof File === "undefined" || !(file instanceof File)) return false;
@@ -56,12 +211,12 @@ export function validateGeometryImportDraft(draft) {
   const errors = {};
   if (!draft?.brand?.trim()) errors.brand = "请输入品牌名称";
 
-  const sizes = draft?.sizes ? Object.keys(draft.sizes) : [];
+  const sizes = getSelectedImportSizes(draft);
   if (sizes.length === 0) errors.sizes = "未识别到可用尺码";
 
   for (const size of sizes) {
     const geometry = draft.sizes[size] ?? {};
-    for (const field of GEOMETRY_IMPORT_FIELDS) {
+    for (const field of GEOMETRY_IMPORT_FIELDS.filter(({ required }) => required)) {
       const error = getGeometryImportFieldError(field, geometry[field.key]);
       if (error) errors[`sizes.${size}.${field.key}`] = error;
     }
@@ -78,32 +233,54 @@ export function validateGeometryImportDraft(draft) {
 
 export function addGeometryImportDraftSize(draft, rawSize) {
   const size = String(rawSize ?? "").trim();
-  if (!draft || !size || draft.sizes?.[size]) return draft;
-  const emptyGeometry = Object.fromEntries(GEOMETRY_IMPORT_FIELDS.map(({ key }) => [key, null]));
-  return {
+  if (!draft || !size) return draft;
+  const alreadySelected = getSelectedImportSizes(draft).includes(size);
+  if (alreadySelected && draft.candidateSizes?.[size]) return draft;
+  const candidateSizes = { ...(draft.candidateSizes ?? draft.sizes ?? {}) };
+  if (!candidateSizes[size]) {
+    candidateSizes[size] = Object.fromEntries(GEOMETRY_IMPORT_FIELDS.map(({ key }) => [key, null]));
+  }
+  const selectedImportSizes = getSelectedImportSizes({ ...draft, candidateSizes });
+  if (selectedImportSizes.includes(size)) return { ...draft, candidateSizes };
+  return applyImportSizeSelection({
     ...draft,
-    sizes: { ...draft.sizes, [size]: emptyGeometry },
+    candidateSizes,
     selectedSize: size,
-  };
+  }, [...selectedImportSizes, size]);
+}
+
+export function toggleGeometryImportSize(draft, rawSize) {
+  const size = toSize(rawSize);
+  if (!draft || !size) return draft;
+  const selectedImportSizes = getSelectedImportSizes(draft);
+  if (!selectedImportSizes.includes(size)) {
+    return applyImportSizeSelection({ ...draft, selectedSize: size }, [...selectedImportSizes, size]);
+  }
+  if (selectedImportSizes.length === 1) return draft;
+  return applyImportSizeSelection(draft, selectedImportSizes.filter((candidate) => candidate !== size));
 }
 
 export function importGeometryToSizeData(size, geometry) {
+  const resolved = resolveGeometryImportPreview(geometry);
+  const values = resolved.geometry ?? geometry;
   return {
     size: String(size),
     wheelSize: "700c",
-    seatTubeLengthMm: geometry.seatTubeLength,
-    seatTubeAngleDeg: geometry.seatTubeAngle,
-    headTubeLengthMm: geometry.headTubeLength,
-    headTubeAngleDeg: geometry.headTubeAngle,
-    effectiveTopTubeMm: geometry.effectiveTopTube ?? null,
-    bbDropMm: geometry.bbDrop,
-    chainstayMm: geometry.chainstay,
-    forkOffsetMm: geometry.forkOffset ?? null,
+    seatTubeLengthMm: values.seatTubeLength,
+    seatTubeAngleDeg: values.seatTubeAngle,
+    headTubeLengthMm: values.headTubeLength,
+    headTubeAngleDeg: values.headTubeAngle,
+    effectiveTopTubeMm: values.effectiveTopTube,
+    bbDropMm: values.bbDrop,
+    chainstayMm: values.chainstay,
+    forkOffsetMm: values.forkOffset,
     trailMm: null,
-    wheelbaseMm: geometry.wheelbase,
+    wheelbaseMm: values.wheelbase,
     standoverMm: null,
-    reachMm: geometry.reach,
-    stackMm: geometry.stack,
+    reachMm: values.reach,
+    stackMm: values.stack,
+    geometrySources: resolved.geometrySources,
+    geometryCompleteness: resolved.geometryCompleteness,
   };
 }
 
@@ -124,12 +301,34 @@ export function bikeToGeometryImportDraft(bike) {
       forkOffset: data.forkOffsetMm ?? null,
     },
   ]));
+  const candidateSizes = Object.fromEntries(Object.entries(bike.importSource?.candidateSizes ?? sizes).map(([size, geometry]) => [
+    String(size),
+    cloneGeometry(geometry),
+  ]));
+  for (const [size, geometry] of Object.entries(sizes)) candidateSizes[size] = cloneGeometry(geometry);
+  const selectedImportSizes = getSelectedImportSizes({
+    candidateSizes,
+    selectedImportSizes: bike.importSource?.selectedImportSizes ?? Object.keys(sizes),
+    selectedSize: bike.size,
+  });
+  const allParserWarnings = bike.importSource?.parserWarnings ?? [];
+  const parserWarnings = scopeGeometryImportWarnings(allParserWarnings, selectedImportSizes);
 
   return {
     brand: bike.brand,
     model: bike.model,
     category: "endurance",
-    sizes,
-    selectedSize: String(bike.size),
+    candidateSizes,
+    sizes: Object.fromEntries(selectedImportSizes.map((size) => [size, cloneGeometry(candidateSizes[size])])),
+    selectedImportSizes,
+    selectedSize: selectedImportSizes.includes(String(bike.size)) ? String(bike.size) : selectedImportSizes[0] ?? "",
+    detectedSizes: bike.importSource?.detectedSizes ?? Object.keys(candidateSizes),
+    detectedSizeCount: bike.importSource?.detectedSizeCount ?? Object.keys(candidateSizes).length,
+    rawRows: bike.importSource?.rawRows ?? [],
+    allParserWarnings,
+    parserWarnings,
+    parserConfirmationCount: parserWarnings.filter((warning) => ["CELL_UNRECOGNIZED", "SIZE_COLUMN_MISSING", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)).length,
+    unrecognizedFields: bike.importSource?.unrecognizedFields ?? [],
+    parserMeta: bike.importSource?.parserMeta ?? null,
   };
 }
