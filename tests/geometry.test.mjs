@@ -14,12 +14,25 @@ import {
   BikeComponents,
   CASSETTE_CENTER_ANCHOR,
   DEFAULT_COMPONENT_SETUP,
+  FIGMA_WHEEL_RESOURCE_GROUP,
   WHEEL_CENTER_ANCHOR,
   resolveComponentSetup,
   updateWheelSelection,
   updateWheelSelectionLink,
 } from "../src/config/bikeComponents.js";
 import { DEFAULT_FIT_SETUP, toGeometryFit } from "../src/config/fitSetup.js";
+import {
+  COLOR_PRESETS,
+  DEFAULT_BIKE_COLORS,
+  normalizeBikeColor,
+} from "../src/config/colorPresets.js";
+import {
+  BIKE_SETUP_STORAGE_KEY,
+  createDefaultBikeSetup,
+  parsePersistedBikeSetup,
+  persistBikeSetup,
+  readPersistedBikeSetup,
+} from "../src/config/setupPersistence.js";
 import { buildBikeGeometry } from "../src/lib/geometry/index.js";
 import { BASE_COCKPIT_STACK_HEIGHT_MM, HEADSET_STACK_HEIGHT, getEffectiveStemPitch } from "../src/lib/geometry/cockpitGeometry.js";
 import {
@@ -94,8 +107,20 @@ const frameBottomBracketSource = readFileSync(
   new URL("../src/assets/bikeTemplates/endurance/frame-bottom-bracket.svg", import.meta.url),
   "utf8",
 );
+const wheelOuterSources = ["low", "mid", "deep", "disc", "wave", "trispoke"].map((name) => readFileSync(
+  new URL(`../src/assets/bikeComponents/wheel/${name}.svg`, import.meta.url),
+  "utf8",
+));
+const wheelInnerSources = ["low", "mid", "deep", "disc", "wave", "trispoke"].map((name) => readFileSync(
+  new URL(`../src/assets/bikeComponents/wheel/${name}-inner.svg`, import.meta.url),
+  "utf8",
+));
 const forkSource = readFileSync(
   new URL("../src/assets/bikeTemplates/endurance/fork.svg", import.meta.url),
+  "utf8",
+);
+const frameChainstaySource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/frame-chainstay.svg", import.meta.url),
   "utf8",
 );
 const framePanelSource = readFileSync(
@@ -106,12 +131,28 @@ const setupPanelSource = readFileSync(
   new URL("../src/components/panels/BikeSetupPanel.jsx", import.meta.url),
   "utf8",
 );
+const colorPaletteSource = readFileSync(
+  new URL("../src/components/ui/ColorPalette.jsx", import.meta.url),
+  "utf8",
+);
 const bikeComponentsSource = readFileSync(
   new URL("../src/config/bikeComponents.js", import.meta.url),
   "utf8",
 );
 const spacerVisualSource = readFileSync(
   new URL("../src/assets/bikeTemplates/endurance/spacer.svg", import.meta.url),
+  "utf8",
+);
+const seatpostVisualSource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/seatpost.svg", import.meta.url),
+  "utf8",
+);
+const handlebarHoodSource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/handlebar-hood.svg", import.meta.url),
+  "utf8",
+);
+const handlebarTapeSource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/handlebar-tape.svg", import.meta.url),
   "utf8",
 );
 
@@ -183,7 +224,14 @@ test("Cockpit Geometry follows the steerer axis and uses nominal stem angle", ()
 
   assert.equal(HEADSET_STACK_HEIGHT, 45);
   assert.equal(BASE_COCKPIT_STACK_HEIGHT_MM, 45);
-  assert.equal(DEFAULT_FIT_SETUP.spacerHeight, 0);
+  assert.deepEqual(DEFAULT_FIT_SETUP, {
+    spacerHeight: 15,
+    stemLength: 110,
+    stemAngle: -13,
+    saddleHeight: 738,
+    saddleSetback: 8,
+    crankLength: 170,
+  });
   assert.deepEqual(spacer0.cockpit.spacerHeadtubeAnchor, spacer0.frame.headTop);
   assert.ok(Math.abs(spacer0.cockpit.stemBase.x - (spacer0.frame.headTop.x - 45 * Math.cos(geometry.headAngle * Math.PI / 180))) < 1e-9);
   assert.ok(Math.abs(spacer0.cockpit.stemBase.y - (spacer0.frame.headTop.y + 45 * Math.sin(geometry.headAngle * Math.PI / 180))) < 1e-9);
@@ -382,20 +430,34 @@ test("Trek Domane is the only catalog model and stores all seven sizes in millim
 
 test("Bike Components exposes the targeted Figma-backed registries", () => {
   assert.deepEqual(Object.keys(BikeComponents), ["Wheel", "Tire", "Chainring", "Crank", "Drivetrain", "Cassette"]);
-  assert.equal(DEFAULT_COMPONENT_SETUP.frontWheelId, "midProfile");
-  assert.equal(DEFAULT_COMPONENT_SETUP.rearWheelId, "midProfile");
-  assert.equal(DEFAULT_COMPONENT_SETUP.linkWheelSelection, false);
+  assert.deepEqual(FIGMA_WHEEL_RESOURCE_GROUP, {
+    fileKey: "CbX0nYfNc7VtHgtSkHZdYS",
+    nodeId: "4:1035",
+    name: "轮组类型",
+  });
+  assert.deepEqual(DEFAULT_COMPONENT_SETUP, {
+    frontWheelId: "lowProfile",
+    rearWheelId: "midProfile",
+    linkWheelSelection: false,
+    tireId: "roadTan",
+    chainringVisualId: "sram",
+    crankVisualId: "red",
+    cassetteId: "sram",
+    drivetrainVisualId: "sram",
+    frameColor: "#111111",
+    forkColor: "#111111",
+    barTapeColor: "#111111",
+  });
   assert.ok(!("wheelId" in DEFAULT_COMPONENT_SETUP));
-  assert.equal(DEFAULT_COMPONENT_SETUP.cassetteId, "default");
   assert.deepEqual(WHEEL_CENTER_ANCHOR, { x: 240, y: 240 });
   assert.deepEqual(CASSETTE_CENTER_ANCHOR, { x: 50, y: 50 });
-  assert.deepEqual(BikeComponents.Wheel.map(({ id, name, wheelSize, figmaNodeId }) => [id, name, wheelSize, figmaNodeId]), [
-    ["lowProfile", "低框轮组", "700c", "4:1034"],
-    ["midProfile", "中框轮组", "700c", "4:1033"],
-    ["deepProfile", "高框轮组", "700c", "4:1032"],
-    ["discWheel", "封闭轮", "700c", "4:1889"],
-    ["waveWheel", "波浪轮", "700c", "4:2285"],
-    ["triSpokeWheel", "三刀轮", "700c", "4:2293"],
+  assert.deepEqual(BikeComponents.Wheel.map(({ id, name, wheelSize, figmaComponentName, figmaNodeId }) => [id, name, wheelSize, figmaComponentName, figmaNodeId]), [
+    ["lowProfile", "低框轮组", "700c", "Property 1=低框轮组", "4:1034"],
+    ["midProfile", "中框轮组", "700c", "Property 1=中框轮组", "4:1033"],
+    ["deepProfile", "高框轮组", "700c", "Property 1=高框轮组", "4:1032"],
+    ["discWheel", "封闭轮", "700c", "Property 1=封闭轮", "4:1889"],
+    ["waveWheel", "波浪轮", "700c", "Property 1=波浪轮", "4:2285"],
+    ["triSpokeWheel", "三刀轮", "700c", "Property 1=三刀轮", "4:2293"],
   ]);
   assert.ok(BikeComponents.Wheel.every((wheel) => wheel.wheelCenterAnchor === WHEEL_CENTER_ANCHOR));
   assert.ok(BikeComponents.Wheel.every((wheel) => !("rimDepth" in wheel)));
@@ -436,9 +498,59 @@ test("Bike Components exposes the targeted Figma-backed registries", () => {
     "crankVisualId",
     "cassetteId",
     "drivetrainVisualId",
+    "frameColor",
+    "forkColor",
+    "barTapeColor",
   ]);
-  assert.equal(DEFAULT_COMPONENT_SETUP.crankVisualId, "shimano105");
   assert.match(setupPanelSource, /<h2>自行车设定<\/h2>/);
+});
+
+test("Setup persistence gives valid saved fields priority and falls back safely", () => {
+  const storage = {
+    value: null,
+    getItem(key) {
+      assert.equal(key, BIKE_SETUP_STORAGE_KEY);
+      return this.value;
+    },
+    setItem(key, value) {
+      assert.equal(key, BIKE_SETUP_STORAGE_KEY);
+      this.value = value;
+    },
+  };
+
+  assert.deepEqual(readPersistedBikeSetup(storage), createDefaultBikeSetup());
+  storage.value = JSON.stringify({
+    fitSetup: { stemLength: 120, saddleHeight: 760 },
+    componentSetup: {
+      frontWheelId: "deepProfile",
+      crankVisualId: "shimano105",
+      linkWheelSelection: true,
+      frameColor: "#6b86a6",
+      barTapeColor: "#c8b79c",
+    },
+  });
+
+  const saved = readPersistedBikeSetup(storage);
+  assert.equal(saved.fitSetup.stemLength, 120);
+  assert.equal(saved.fitSetup.saddleHeight, 760);
+  assert.equal(saved.fitSetup.spacerHeight, DEFAULT_FIT_SETUP.spacerHeight);
+  assert.equal(saved.componentSetup.frontWheelId, "deepProfile");
+  assert.equal(saved.componentSetup.crankVisualId, "shimano105");
+  assert.equal(saved.componentSetup.linkWheelSelection, true);
+  assert.equal(saved.componentSetup.rearWheelId, DEFAULT_COMPONENT_SETUP.rearWheelId);
+  assert.equal(saved.componentSetup.frameColor, "#6B86A6");
+  assert.equal(saved.componentSetup.forkColor, DEFAULT_COMPONENT_SETUP.forkColor);
+  assert.equal(saved.componentSetup.barTapeColor, "#C8B79C");
+
+  storage.value = JSON.stringify({
+    fitSetup: { stemLength: "invalid" },
+    componentSetup: { frontWheelId: "missing-resource", forkColor: "not-a-color" },
+  });
+  assert.deepEqual(readPersistedBikeSetup(storage), createDefaultBikeSetup());
+  assert.deepEqual(parsePersistedBikeSetup("not-json"), createDefaultBikeSetup());
+
+  assert.equal(persistBikeSetup(saved, storage), true);
+  assert.deepEqual(readPersistedBikeSetup(storage), saved);
 });
 
 test("Wheel and Tire stay split, registry-driven, and axle-centered", () => {
@@ -530,14 +642,16 @@ test("Cassette is registry-driven, RearAxle-centered, and synchronized with rear
 });
 
 test("Frame, Fit Setup, and Component Setup are independent sources of truth", () => {
+  assert.match(appSource, /const \[initialSetup\] = useState\(\(\) => readPersistedBikeSetup\(\)\)/);
   assert.match(appSource, /const \[frameState, setFrameState\] = useState\(\{/);
   assert.match(appSource, /bikeId: trekDomane\.id,[\s\S]*size: trekDomane\.visualBaseSize/);
-  assert.match(appSource, /const \[fitSetup, setFitSetup\] = useState\(\{ \.\.\.DEFAULT_FIT_SETUP \}\)/);
-  assert.match(appSource, /const \[componentSetup, setComponentSetup\] = useState\(\{ \.\.\.DEFAULT_COMPONENT_SETUP \}\)/);
+  assert.match(appSource, /const \[fitSetup, setFitSetup\] = useState\(\(\) => \(\{ \.\.\.initialSetup\.fitSetup \}\)\)/);
+  assert.match(appSource, /const \[componentSetup, setComponentSetup\] = useState\(\(\) => \(\{ \.\.\.initialSetup\.componentSetup \}\)\)/);
   assert.match(appSource, /const sizeData = getTrekDomaneSize\(frameState\.size\)/);
   assert.match(appSource, /const setFrameSize = \(size\) => setFrameState/);
-  assert.match(appSource, /const updateFitSetup = \(key, value\) => setFitSetup/);
-  assert.match(appSource, /const updateComponentSetup = \(key, value\) => setComponentSetup/);
+  assert.match(appSource, /const updateFitSetup = \(key, value\) => \{[\s\S]*shouldPersistSetup\.current = true;[\s\S]*setFitSetup/);
+  assert.match(appSource, /const updateComponentSetup = \(key, value\) => \{[\s\S]*shouldPersistSetup\.current = true;[\s\S]*setComponentSetup/);
+  assert.match(appSource, /if \(!shouldPersistSetup\.current\) return;[\s\S]*persistBikeSetup\(\{ fitSetup, componentSetup \}\)/);
   assert.match(appSource, /<BikeVisualizer[\s\S]*bike=\{bike\}[\s\S]*fit=\{fit\}[\s\S]*componentSetup=\{resolvedComponentSetup\}[\s\S]*\/>/);
   assert.match(appSource, /if \(key === "frontWheelId"\) return updateWheelSelection\(current, "front", value\)/);
   assert.match(appSource, /if \(key === "rearWheelId"\) return updateWheelSelection\(current, "rear", value\)/);
@@ -598,13 +712,24 @@ test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without
   for (const forbidden of ["坐垫 / 座杆", "Stem", "Handlebar", "Seatpost", "Cassette", "Rotor"]) {
     assert.ok(!setupPanelSource.includes(`title="${forbidden}"`));
   }
-  assert.match(setupPanelSource, /useState\("fit"\)/);
+  assert.match(setupPanelSource, /useState\("components"\)/);
   assert.match(setupPanelSource, />骑行设定</);
   assert.match(setupPanelSource, />车身配件</);
+  assert.ok(setupPanelSource.indexOf(">车身配件<") < setupPanelSource.indexOf(">骑行设定<"));
+  assert.match(stylesSource, /\.setup-tabs\s*\{[^}]*margin-top:\s*12px;[^}]*padding:\s*3px;/s);
+  assert.match(stylesSource, /\.setup-tabs button\s*\{[^}]*min-height:\s*44px;[^}]*border-radius:\s*9px;/s);
+  assert.match(stylesSource, /\.setup-tabs strong\s*\{[^}]*font-size:\s*var\(--font-size-md\);/s);
   for (const fitField of ["垫圈高度", "把立长度", "把立角度", "坐垫高度", "坐垫后移", "曲柄长度 mm"]) {
     assert.ok(setupPanelSource.includes(fitField));
   }
   assert.doesNotMatch(appSource, /isSetupPanelOpen|隐藏设定|显示设定|aria-label="关于"|aria-label="帮助"/);
+  assert.doesNotMatch(appSource, /className="topbar"|className="brand"|className="topbar-context"|公路车几何设定首页|当前车型/);
+  assert.match(appSource, /import brandLogo from "\.\/assets\/brand\/logo_bai\.png"/);
+  assert.match(appSource, /<header className="site-header">[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<\/header>/);
+  assert.match(stylesSource, /\.site-header\s*\{[^}]*height:\s*64px;[^}]*border:\s*0;[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
+  assert.match(stylesSource, /\.site-header__logo\s*\{[^}]*height:\s*36px;[^}]*object-fit:\s*contain;/s);
+  assert.match(stylesSource, /\.workspace\s*\{[^}]*height:\s*calc\(100vh - 64px\);[^}]*min-height:\s*656px;/s);
+  assert.doesNotMatch(stylesSource, /\.topbar(?:\s|\.|\{|,)|\.brand(?:\s|\.|\{|,)|\.topbar-context(?:\s|\.|\{|,)|calc\(100vh\s*-\s*(?:68px|56px)\)/);
 });
 
 test("stage fullscreen replaces local zoom controls and preserves the mounted workspace", () => {
@@ -747,13 +872,146 @@ test("bicycle resources render without SVG or CSS shadow effects", () => {
   assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
 });
 
-test("production frame, bottom bracket, and fork preserve the current Figma palette", () => {
-  assert.match(frameBottomBracketSource, /fill="#CDCDCD"/);
-  assert.doesNotMatch(frameBottomBracketSource, /#121684|#3A37BF|#5552FE|#9598FF/i);
-  assert.match(forkSource, /<path[^>]*fill="#CDCDCD"/);
-  assert.match(forkSource, /<circle[^>]*fill="#878787"/);
-  assert.doesNotMatch(forkSource, /#121684|#3A37BF|#5552FE|#9598FF/i);
+test("production frame and fork expose colorable bodies while axle rods stay fixed black at 30%", () => {
+  assert.match(frameBottomBracketSource, /fill="black"/);
+  assert.match(forkSource, /<path[^>]*fill="black"/);
+  assert.match(forkSource, /<circle[^>]*fill="#000000"[^>]*fill-opacity="0\.3"/);
+  assert.match(frameChainstaySource, /<circle[^>]*fill="#000000"[^>]*fill-opacity="0\.3"/);
   assert.match(stylesSource, /\.figma-bike-template \.figma-bike__frame,[\s\S]*?\.figma-bike-template \.figma-bike__fork\s*\{[^}]*filter:\s*none;/);
+  assert.match(stylesSource, /\.figma-bike-template \.figma-bike__handlebar-tape\s*\{[^}]*filter:\s*none;/);
+});
+
+test("frame, fork, and bar tape colors are preset-driven, independent, and persisted", () => {
+  assert.deepEqual(COLOR_PRESETS, [
+    { key: "red", label: "红色", value: "#C94B4B" },
+    { key: "orange", label: "橙色", value: "#D7783F" },
+    { key: "yellow", label: "黄色", value: "#D6B84B" },
+    { key: "green", label: "绿色", value: "#4F8A62" },
+    { key: "blue", label: "蓝色", value: "#3E73C8" },
+    { key: "purple", label: "紫色", value: "#765FA8" },
+    { key: "peach", label: "桃色", value: "#D98972" },
+    { key: "pink", label: "粉色", value: "#C97991" },
+    { key: "black", label: "黑色", value: "#111111" },
+    { key: "white", label: "白色", value: "#F2F2F0" },
+    { key: "graphite", label: "石墨灰", value: "#4B4F56" },
+    { key: "silver", label: "银灰", value: "#A7ADB5" },
+    { key: "sage", label: "鼠尾草绿", value: "#899A84" },
+    { key: "burgundy", label: "酒红", value: "#74454D" },
+    { key: "sand", label: "沙米色", value: "#C8B79C" },
+  ]);
+  assert.deepEqual(DEFAULT_BIKE_COLORS, {
+    frameColor: "#111111",
+    forkColor: "#111111",
+    barTapeColor: "#111111",
+  });
+  assert.equal(normalizeBikeColor("#6b86a6"), "#6B86A6");
+  assert.equal(normalizeBikeColor("invalid"), "#111111");
+
+  const resolved = resolveComponentSetup({
+    ...DEFAULT_COMPONENT_SETUP,
+    frameColor: "#6b86a6",
+    forkColor: "#899a84",
+    barTapeColor: "#6b3f46",
+  });
+  assert.equal(resolved.frameColor, "#6B86A6");
+  assert.equal(resolved.forkColor, "#899A84");
+  assert.equal(resolved.barTapeColor, "#6B3F46");
+
+  const modelCardIndex = framePanelSource.indexOf('<PanelSection title="车型">');
+  const sizeCardIndex = framePanelSource.indexOf('<PanelSection title="尺码"');
+  const appearanceCardIndex = framePanelSource.indexOf('<PanelSection title="车架外观">');
+  const summaryCardIndex = framePanelSource.indexOf('<PanelSection title="几何摘要"');
+  const detailsCardIndex = framePanelSource.indexOf('title="几何详情"');
+  assert.ok(modelCardIndex < sizeCardIndex && sizeCardIndex < appearanceCardIndex && appearanceCardIndex < summaryCardIndex && summaryCardIndex < detailsCardIndex);
+  assert.doesNotMatch(framePanelSource, /appearanceTarget|frameAppearanceTargets|车架外观着色目标/);
+  assert.match(framePanelSource, /label="车架颜色"[\s\S]*value=\{componentSetup\.frameColor\}[\s\S]*updateComponentSetup\("frameColor", value\)/);
+  assert.match(framePanelSource, /label="前叉颜色"[\s\S]*value=\{componentSetup\.forkColor\}[\s\S]*updateComponentSetup\("forkColor", value\)/);
+  assert.match(appSource, /<FrameGeometryPanel[\s\S]*componentSetup=\{componentSetup\}[\s\S]*updateComponentSetup=\{updateComponentSetup\}/);
+
+  assert.match(setupPanelSource, /<PanelSection title="颜色">/);
+  assert.match(setupPanelSource, /<ColorPalette label="把带颜色" value=\{componentSetup\.barTapeColor\}/);
+  assert.doesNotMatch(setupPanelSource, /label="车架颜色"|label="前叉颜色"|componentSetup\.(?:frameColor|forkColor)/);
+  assert.match(colorPaletteSource, /type="color"/);
+  assert.match(colorPaletteSource, /COLOR_PRESETS\.map/);
+  assert.equal(COLOR_PRESETS.length, 15);
+  assert.match(stylesSource, /\.color-swatches\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(8, 1fr\);[^}]*grid-template-rows:\s*repeat\(2, 26px\);[^}]*gap:\s*8px 0;/s);
+  assert.match(stylesSource, /\.color-swatch\s*\{[^}]*justify-self:\s*center;[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border-radius:\s*8px;/s);
+  assert.match(stylesSource, /\.color-swatch\.is-selected\s*\{[^}]*box-shadow:\s*0 0 0 2px var\(--brand-primary\),\s*0 0 0 4px rgba\(22,119,255,\.14\)/s);
+  assert.match(colorPaletteSource, /className=\{`color-swatch color-swatch--custom[\s\S]*title="自定义色值"[\s\S]*type="color"/);
+  assert.match(stylesSource, /\.color-swatch--custom\s*\{[^}]*background:\s*conic-gradient\(/s);
+  assert.doesNotMatch(colorPaletteSource, /color-custom-button|<span>自定义色值<\/span>/);
+
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameDownTubeSource, "black", components\.frameColor\)/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(forkSource, "black", components\.forkColor\)/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(handlebarTapeSource, "#D9D9D9", components\.barTapeColor\)/);
+  assert.match(enduranceTemplateSource, /data-frame-color=\{components\.frameColor\}/);
+  assert.match(enduranceTemplateSource, /data-fork-color=\{components\.forkColor\}/);
+  assert.match(enduranceTemplateSource, /data-bar-tape-color=\{components\.barTapeColor\}/);
+});
+
+test("wheel resources preserve the latest Figma material palette", () => {
+  for (const source of wheelOuterSources) {
+    assert.match(source, /fill="#191919"/);
+  }
+  for (const source of wheelInnerSources) {
+    assert.match(source, /opacity="0\.04"/);
+    assert.match(source, /fill="white"/);
+  }
+});
+
+test("Dark Cycling UI maps brand interactions to blue and keeps green semantic", () => {
+  assert.match(stylesSource, /--brand-primary:\s*#246BFD;/);
+  assert.match(stylesSource, /--brand-primary-hover:\s*#3B7BFF;/);
+  assert.match(stylesSource, /--brand-primary-active:\s*#1E5FE5;/);
+  assert.match(stylesSource, /--accent:\s*var\(--brand-primary\);/);
+  assert.match(stylesSource, /--status-success:\s*#22D66F;/);
+  assert.match(stylesSource, /\.status-dot\s*\{[^}]*background:\s*var\(--status-success\);/s);
+  assert.match(stylesSource, /\.switch\.is-on\s*\{[^}]*background:\s*var\(--selected-bg\);/s);
+  assert.match(stylesSource, /\.contact-point circle:first-child\s*\{[^}]*stroke:\s*var\(--accent\);[^}]*var\(--accent-glow\)/s);
+  assert.doesNotMatch(stylesSource, /#22e36e|rgba\(34\s*,\s*227\s*,\s*110/i);
+  assert.doesNotMatch(prismSource, /brand-primary|status-success|var\(--accent/i);
+  assert.doesNotMatch(prismCssSource, /brand-primary|status-success|var\(--accent/i);
+});
+
+test("Geometry annotations use layered white tokens while contact points stay brand blue", () => {
+  assert.match(stylesSource, /--geometry-label:\s*rgba\(255,255,255,\.72\);/);
+  assert.match(stylesSource, /--geometry-value:\s*rgba\(255,255,255,\.96\);/);
+  assert.match(stylesSource, /--geometry-line:\s*rgba\(255,255,255,\.42\);/);
+  assert.match(stylesSource, /\.dimension-line line\s*\{[^}]*stroke:\s*var\(--geometry-line\);/s);
+  assert.match(stylesSource, /\.dimension-line text\s*\{[^}]*fill:\s*var\(--geometry-label\);/s);
+  assert.match(stylesSource, /\.dimension-line \.dimension-value\s*\{[^}]*fill:\s*var\(--geometry-value\);/s);
+  assert.match(stylesSource, /\.angle-label path\s*\{[^}]*stroke:\s*var\(--geometry-line\);/s);
+  assert.match(stylesSource, /\.angle-label text\s*\{[^}]*fill:\s*var\(--geometry-value\);/s);
+  assert.match(stylesSource, /\.angle-label \.angle-label__name\s*\{[^}]*fill:\s*var\(--geometry-label\);/s);
+  assert.match(stylesSource, /\.contact-point text\s*\{[^}]*fill:\s*var\(--accent\);/s);
+  assert.match(stylesSource, /\.contact-point circle:first-child\s*\{[^}]*stroke:\s*var\(--accent\);/s);
+});
+
+test("selected and unselected option controls share one high-contrast state system", () => {
+  assert.match(stylesSource, /--control-bg:\s*rgba\(255,255,255,\.06\);/);
+  assert.match(stylesSource, /--control-bg-hover:\s*rgba\(255,255,255,\.10\);/);
+  assert.match(stylesSource, /--control-text:\s*rgba\(255,255,255,\.72\);/);
+  assert.match(stylesSource, /--control-text-hover:\s*rgba\(255,255,255,\.90\);/);
+  assert.match(stylesSource, /--control-disabled-bg:\s*rgba\(255,255,255,\.035\);/);
+  assert.match(stylesSource, /--control-disabled-text:\s*rgba\(244,246,248,\.28\);/);
+  assert.match(stylesSource, /--selected-bg:\s*#1677FF;/);
+  assert.match(stylesSource, /--selected-text:\s*#FFFFFF;/);
+  assert.match(stylesSource, /--selected-shadow:\s*0 0 0 1px rgba\(22,119,255,\.15\), 0 6px 16px rgba\(22,119,255,\.18\);/);
+
+  for (const selector of ["setup-tabs button", "wheel-matrix__cell", "segmented button", "geometry-language-toggle button"]) {
+    const escaped = selector.replace(/\./g, "\\.");
+    assert.match(stylesSource, new RegExp(`\\.${escaped}\\s*\\{[^}]*background:\\s*var\\(--control-bg\\);[^}]*color:\\s*var\\(--control-text\\);`, "s"));
+    assert.match(stylesSource, new RegExp(`\\.${escaped}:hover\\s*\\{[^}]*background:\\s*var\\(--control-bg-hover\\);[^}]*color:\\s*var\\(--control-text-hover\\);`, "s"));
+  }
+
+  for (const selector of ["setup-tabs button.is-active", "wheel-matrix__cell.is-selected", "segmented button.is-selected", "geometry-language-toggle button.is-active"]) {
+    const escaped = selector.replace(/\./g, "\\.");
+    assert.match(stylesSource, new RegExp(`\\.${escaped}\\s*\\{[^}]*background:\\s*var\\(--selected-bg\\);[^}]*color:\\s*var\\(--selected-text\\);[^}]*box-shadow:\\s*var\\(--selected-shadow\\);`, "s"));
+  }
+
+  assert.match(stylesSource, /\.model-card span\s*\{[^}]*background:\s*var\(--selected-bg\);[^}]*color:\s*var\(--selected-text\);[^}]*box-shadow:\s*var\(--selected-shadow\);/s);
+  assert.match(stylesSource, /\.stepper-control button:hover\s*\{[^}]*background:\s*var\(--control-bg-hover\);[^}]*color:\s*var\(--control-text-hover\);/s);
+  assert.doesNotMatch(stylesSource, /(?:setup-tabs button|wheel-matrix__cell|segmented button|geometry-language-toggle button):hover\s*\{[^}]*(?:accent-soft|var\(--accent\))/s);
 });
 
 test("sidebar and visualizer header shells stay fully transparent without removing inner cards", () => {
@@ -763,17 +1021,36 @@ test("sidebar and visualizer header shells stay fully transparent without removi
   }
 
   assert.match(stylesSource, /\.side-panel::before,[\s\S]*?\.visualizer__header::after\s*\{[^}]*display:\s*none;[^}]*content:\s*none;/);
-  assert.match(stylesSource, /\.control-section\s*\{[^}]*background:\s*var\(--surface\);/);
-  assert.match(stylesSource, /\.setup-tabs\s*\{[^}]*background:\s*var\(--surface-raised\);/);
+  assert.match(stylesSource, /\.control-section\s*\{[^}]*background:\s*var\(--side-card-glass-bg\);/);
+  assert.match(stylesSource, /\.setup-tabs\s*\{[^}]*background:\s*var\(--side-card-glass-bg\);/);
   assert.match(bikeVisualizerSource, /<div className="visualizer__header">[\s\S]*TREK|<div className="visualizer__header">[\s\S]*bike\.brand\.toUpperCase/);
   assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
 });
 
-test("only left Frame Geometry cards receive the restrained internal light bloom", () => {
-  assert.match(stylesSource, /\.frame-panel \.control-section\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;[^}]*isolation:\s*isolate;/);
-  assert.match(stylesSource, /\.frame-panel \.control-section::before\s*\{[^}]*content:\s*"";[^}]*border-radius:\s*inherit;[^}]*pointer-events:\s*none;[^}]*radial-gradient\([^}]*filter:\s*blur\(36px\);[^}]*opacity:\s*\.14;/);
-  assert.match(stylesSource, /\.frame-panel \.control-section > \*\s*\{[^}]*z-index:\s*1;/);
-  assert.doesNotMatch(stylesSource, /\.setup-panel \.control-section::before/);
+test("sidebar scroll regions keep vertical scrolling while hiding scrollbar chrome", () => {
+  assert.match(stylesSource, /\.side-panel__scroll\s*\{[^}]*overflow-y:\s*auto;[^}]*scrollbar-width:\s*none;[^}]*-ms-overflow-style:\s*none;/s);
+  assert.match(stylesSource, /\.side-panel__scroll::\-webkit-scrollbar\s*\{[^}]*display:\s*none;/s);
+});
+
+test("side and floating cards share the neutral-black glass system without colored overlays", () => {
+  assert.match(stylesSource, /--card-glass-bg:\s*rgba\(5,7,10,\.58\);/);
+  assert.match(stylesSource, /--side-card-glass-bg:\s*rgba\(5,7,10,\.48\);/);
+  assert.match(stylesSource, /--card-glass-border:\s*rgba\(255,255,255,\.05\);/);
+  assert.match(stylesSource, /--card-glass-shadow:\s*0 8px 24px rgba\(0,0,0,\.24\);/);
+  assert.match(stylesSource, /--card-glass-filter:\s*blur\(20px\) saturate\(110%\);/);
+
+  for (const selector of ["control-section", "setup-tabs"]) {
+    const rule = new RegExp(`\\.${selector}\\s*\\{[^}]*border:\\s*0;[^}]*background:\\s*var\\(--side-card-glass-bg\\);[^}]*box-shadow:\\s*var\\(--card-glass-shadow\\);[^}]*backdrop-filter:\\s*var\\(--card-glass-filter\\);[^}]*-webkit-backdrop-filter:\\s*var\\(--card-glass-filter\\);`, "s");
+    assert.match(stylesSource, rule, `${selector} must use the shared neutral glass card tokens`);
+  }
+
+  for (const selector of ["canvas-tools"]) {
+    const rule = new RegExp(`\\.${selector}\\s*\\{[^}]*border:\\s*1px solid var\\(--card-glass-border\\);[^}]*background:\\s*var\\(--card-glass-bg\\);[^}]*box-shadow:\\s*var\\(--card-glass-shadow\\);[^}]*backdrop-filter:\\s*var\\(--card-glass-filter\\);[^}]*-webkit-backdrop-filter:\\s*var\\(--card-glass-filter\\);`, "s");
+    assert.match(stylesSource, rule, `${selector} must retain the floating glass background`);
+  }
+
+  assert.match(stylesSource, /\.stage-fullscreen-control\s*\{[^}]*border:\s*0;[^}]*background:\s*var\(--card-glass-bg\);[^}]*box-shadow:\s*var\(--card-glass-shadow\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);/s);
+  assert.doesNotMatch(stylesSource, /\.frame-panel \.control-section::before|\.setup-panel \.control-section::before/);
 });
 
 test("all Trek Domane source rows preserve the supplied normalized geometry fields", () => {
@@ -1146,10 +1423,20 @@ test("Figma component connection anchors remain exact for all seven Domane sizes
 test("Figma cockpit visuals follow the physical Spacer → Stem → Handlebar chain", () => {
   assert.match(enduranceTemplateSource, /assetAnchors\.spacerHeadtubeAnchor,[\s\S]*assetAnchors\.spacerVisualAxisEnd,[\s\S]*projected\.spacerHeadtubeAnchor,[\s\S]*projected\.spacerTop/);
   assert.match(enduranceTemplateSource, /<ProgrammaticStem start=\{projected\.stemSpacerAnchor\} end=\{projected\.stemHandlebarAnchor\} \/>/);
-  assert.match(enduranceTemplateSource, /<rect[\s\S]*width=\{length \+ PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}[\s\S]*rx=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}[\s\S]*ry=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}/);
+  assert.match(enduranceTemplateSource, /<rect[\s\S]*x=\{start\.x - PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}[\s\S]*width=\{length \+ PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}[\s\S]*rx=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}[\s\S]*ry=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}/);
   assert.doesNotMatch(enduranceTemplateSource, /strokeLinecap="round"|programmatic-capsule/);
   assert.doesNotMatch(enduranceTemplateSource, /stem\.svg|stemMatrix|layers\.stem|assetAnchors\.stem/);
   assert.match(enduranceTemplateSource, /const handlebarMatrix = uniformAroundPoint\([\s\S]*assetAnchors\.handlebarClampAnchor,[\s\S]*projected\.handlebarClampAnchor,[\s\S]*figmaShapeScale/);
+  assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.layers.handlebarHood, { nodeId: "8:9679", x: 1240, y: 289, width: 136.383102, height: 127.999939 });
+  assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.layers.handlebarTape, { nodeId: "8:9665", x: 1221, y: 287, width: 164, height: 162 });
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.handlebar, undefined);
+  assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.handlebarClampAnchor, { layer: "handlebarHood", x: 19, y: 39.79 });
+  assert.match(handlebarHoodSource, /width="136\.383" height="128"[\s\S]*fill="black"/);
+  assert.match(handlebarTapeSource, /width="164" height="162"[\s\S]*fill="#D9D9D9"/);
+  assert.match(enduranceTemplateSource, /data-handlebar-position-binding="shared-handlebar-matrix"/);
+  assert.match(enduranceTemplateSource, /asset=\{handlebarHood\} layer=\{layers\.handlebarHood\} transform=\{handlebarMatrix\}[\s\S]*asset=\{handlebarTapeAsset\} layer=\{layers\.handlebarTape\} transform=\{handlebarMatrix\}/);
+  assert.ok(enduranceTemplateSource.indexOf("asset={handlebarHood}") < enduranceTemplateSource.indexOf("asset={handlebarTapeAsset}"));
+  assert.doesNotMatch(enduranceTemplateSource, /asset=\{handlebar\}|layers\.handlebar\b/);
   assert.doesNotMatch(enduranceTemplateSource, /assetAnchors\.(stemBase|stemClamp|handlebarClamp)\b/);
   assert.match(enduranceTemplateSource, /totalSpacerStackHeight > 0[\s\S]*asset=\{spacer\}/);
   assert.match(enduranceTemplateSource, /const handlebarContactPoint = applyMatrix\(handlebarMatrix, sourceAnchors\.handlebarAnchor\)/);
@@ -1239,10 +1526,12 @@ test("Figma Cockpit keeps Spacer and Handlebar resources while Stem is programma
   assert.match(spacerVisualSource, /width="127" height="106" viewBox="0 0 127 106"/);
   assert.match(spacerVisualSource, /id="Vector 12"/);
   assert.match(spacerVisualSource, /fill="#4C4C4C"/);
+  assert.match(seatpostVisualSource, /fill="#191919"/);
   assert.match(enduranceTemplateSource, /data-stem-visual-source="programmatic-rounded-rect"/);
+  assert.match(enduranceTemplateSource, /fill="#191919"[\s\S]*?data-stem-visual-source="programmatic-rounded-rect"/);
   assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_THICKNESS_PX = 18/);
   assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_CORNER_RADIUS_PX = 4/);
-  assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_LEFT_OVERLAP_PX = 8/);
+  assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_LEFT_OVERLAP_PX = 12/);
   assert.match(enduranceTemplateSource, /data-stem-left-overlap-px=\{PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}/);
 });
 

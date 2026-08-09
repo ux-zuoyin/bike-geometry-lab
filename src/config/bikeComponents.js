@@ -1,3 +1,5 @@
+import { DEFAULT_BIKE_COLORS, normalizeBikeColor } from "./colorPresets.js";
+
 const wheelLow = new URL("../assets/bikeComponents/wheel/low.svg", import.meta.url).href;
 const wheelLowInner = new URL("../assets/bikeComponents/wheel/low-inner.svg", import.meta.url).href;
 const wheelMid = new URL("../assets/bikeComponents/wheel/mid.svg", import.meta.url).href;
@@ -47,6 +49,12 @@ const CASSETTE_CENTER_ANCHOR = Object.freeze({ x: 50, y: 50 });
 const BOTTOM_BRACKET_ANCHOR = "bottomBracket";
 const REAR_AXLE_ANCHOR = "rearAxle";
 
+export const FIGMA_WHEEL_RESOURCE_GROUP = Object.freeze({
+  fileKey: "CbX0nYfNc7VtHgtSkHZdYS",
+  nodeId: "4:1035",
+  name: "轮组类型",
+});
+
 const visualLayer = (visualResource, x, y, width, height, figmaNodeId) => Object.freeze({
   visualResource,
   sourceBounds: Object.freeze({ x, y, width, height }),
@@ -75,6 +83,7 @@ export const BikeComponents = Object.freeze({
         visualLayer(wheelLowInner, 28, 28, 424, 424, "4:8217"),
       ]),
       wheelCenterAnchor: WHEEL_CENTER_ANCHOR,
+      figmaComponentName: "Property 1=低框轮组",
       figmaNodeId: "4:1034",
     },
     {
@@ -87,6 +96,7 @@ export const BikeComponents = Object.freeze({
         visualLayer(wheelMidInner, 45, 45, 390, 390, "4:8232"),
       ]),
       wheelCenterAnchor: WHEEL_CENTER_ANCHOR,
+      figmaComponentName: "Property 1=中框轮组",
       figmaNodeId: "4:1033",
     },
     {
@@ -99,6 +109,7 @@ export const BikeComponents = Object.freeze({
         visualLayer(wheelDeepInner, 53, 53, 374, 374, "4:8236"),
       ]),
       wheelCenterAnchor: WHEEL_CENTER_ANCHOR,
+      figmaComponentName: "Property 1=高框轮组",
       figmaNodeId: "4:1032",
     },
     {
@@ -115,6 +126,7 @@ export const BikeComponents = Object.freeze({
         visualLayer(wheelDiscInner, 103, 103, 274, 274, "4:8240"),
       ]),
       wheelCenterAnchor: WHEEL_CENTER_ANCHOR,
+      figmaComponentName: "Property 1=封闭轮",
       figmaNodeId: "4:1889",
     },
     {
@@ -127,6 +139,7 @@ export const BikeComponents = Object.freeze({
         visualLayer(wheelWaveInner, 35.2435, 35.2435, 409.513, 409.514, "4:8247"),
       ]),
       wheelCenterAnchor: WHEEL_CENTER_ANCHOR,
+      figmaComponentName: "Property 1=波浪轮",
       figmaNodeId: "4:2285",
     },
     {
@@ -139,6 +152,7 @@ export const BikeComponents = Object.freeze({
         visualLayer(wheelTriSpokeInner, 0, 0, 480, 480, "4:8258"),
       ]),
       wheelCenterAnchor: WHEEL_CENTER_ANCHOR,
+      figmaComponentName: "Property 1=三刀轮",
       figmaNodeId: "4:2293",
     },
   ]),
@@ -209,14 +223,15 @@ export const BikeComponents = Object.freeze({
 });
 
 export const DEFAULT_COMPONENT_SETUP = Object.freeze({
-  frontWheelId: "midProfile",
+  frontWheelId: "lowProfile",
   rearWheelId: "midProfile",
   linkWheelSelection: false,
-  tireId: "roadBlack",
-  chainringVisualId: "default",
-  crankVisualId: "shimano105",
-  cassetteId: "default",
-  drivetrainVisualId: "shimano",
+  tireId: "roadTan",
+  chainringVisualId: "sram",
+  crankVisualId: "red",
+  cassetteId: "sram",
+  drivetrainVisualId: "sram",
+  ...DEFAULT_BIKE_COLORS,
 });
 
 function resourceById(resources, id, fallbackId) {
@@ -253,6 +268,9 @@ export function resolveComponentSetup(componentSetup) {
     crank,
     cassette,
     drivetrain,
+    frameColor: normalizeBikeColor(componentSetup.frameColor, DEFAULT_COMPONENT_SETUP.frameColor),
+    forkColor: normalizeBikeColor(componentSetup.forkColor, DEFAULT_COMPONENT_SETUP.forkColor),
+    barTapeColor: normalizeBikeColor(componentSetup.barTapeColor, DEFAULT_COMPONENT_SETUP.barTapeColor),
   });
 }
 

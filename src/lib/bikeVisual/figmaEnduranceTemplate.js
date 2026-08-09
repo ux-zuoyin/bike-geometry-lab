@@ -30,7 +30,8 @@ export const FIGMA_ENDURANCE_TEMPLATE = {
     seatpost: { nodeId: "1:298", x: 713, y: 272, width: 102, height: 256 },
     saddle: { nodeId: "1:300", x: 629, y: 242, width: 176, height: 40 },
     spacer: { nodeId: "1:282", x: 1148, y: 313, width: 127, height: 106 },
-    handlebar: { nodeId: "1:295", x: 1221, y: 287, width: 164, height: 162 },
+    handlebarHood: { nodeId: "8:9679", x: 1240, y: 289, width: 136.383102, height: 127.999939 },
+    handlebarTape: { nodeId: "8:9665", x: 1221, y: 287, width: 164, height: 162 },
     fork: { nodeId: "1:233", x: 1190, y: 470, width: 160, height: 282 },
     chainring: { nodeId: "1:21", x: 805, y: 713, width: 150, height: 150 },
     driveCrank: { nodeId: "1:40", x: 864, y: 772, width: 156, height: 32 },
@@ -46,8 +47,8 @@ export const FIGMA_ENDURANCE_TEMPLATE = {
     spacerHeadtubeAnchor: { layer: "spacer", nodeId: "4:3786", x: 19, y: 28 },
     // Midpoint of the distal edge of Spacer Vector 12; defines only its visual main axis.
     spacerVisualAxisEnd: { layer: "spacer", nodeId: "4:3789", x: 38.2318, y: 100.5043 },
-    // Stem clamp location on the original handlebar vector.
-    handlebarClampAnchor: { layer: "handlebar", x: 38, y: 41.79 },
+    // Stem clamp location on the shared hood/tape assembly coordinate system.
+    handlebarClampAnchor: { layer: "handlebarHood", x: 19, y: 39.79 },
     // Midpoint of the fork SVG top edge and center of its axle eye.
     forkTop: { layer: "fork", x: 16.16603, y: 4.0221845 },
     forkAxle: { layer: "fork", x: 138, y: 262 },

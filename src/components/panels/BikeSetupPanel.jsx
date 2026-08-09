@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BikeComponents } from "../../config/bikeComponents.js";
+import { ColorPalette } from "../ui/ColorPalette.jsx";
 import { SegmentedControl, Stepper, Switch } from "../ui/Stepper.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 
@@ -91,6 +92,17 @@ function ResourceSegment({ resources, value, onChange }) {
   return <SegmentedControl options={optionsFrom(resources)} value={value} onChange={onChange} wrap />;
 }
 
+function ColorSection({ componentSetup, updateComponentSetup }) {
+  return (
+    <PanelSection title="颜色">
+      <p className="section-note section-note--lead">设置把带缠绕部分的颜色。</p>
+      <div className="color-config">
+        <ColorPalette label="把带颜色" value={componentSetup.barTapeColor} onChange={(value) => updateComponentSetup("barTapeColor", value)} />
+      </div>
+    </PanelSection>
+  );
+}
+
 function FitSetupEditor({ fitSetup, updateFitSetup }) {
   return (
     <>
@@ -123,6 +135,7 @@ function FitSetupEditor({ fitSetup, updateFitSetup }) {
 function ComponentsEditor({ componentSetup, updateComponentSetup }) {
   return (
     <>
+      <ColorSection componentSetup={componentSetup} updateComponentSetup={updateComponentSetup} />
       <WheelSection componentSetup={componentSetup} updateComponentSetup={updateComponentSetup} />
 
       <PanelSection title="外胎">
@@ -156,7 +169,7 @@ function ComponentsEditor({ componentSetup, updateComponentSetup }) {
 }
 
 export function BikeSetupPanel({ fitSetup, updateFitSetup, componentSetup, updateComponentSetup, isStageFullscreen = false }) {
-  const [activeTab, setActiveTab] = useState("fit");
+  const [activeTab, setActiveTab] = useState("components");
 
   return (
     <aside className="side-panel setup-panel" aria-label="自行车设定" aria-hidden={isStageFullscreen} inert={isStageFullscreen ? true : undefined}>
@@ -164,19 +177,19 @@ export function BikeSetupPanel({ fitSetup, updateFitSetup, componentSetup, updat
         <h2>自行车设定</h2>
         <p>骑行设定与配件选择相互独立。</p>
         <div className="setup-tabs" role="tablist" aria-label="自行车设定">
-          <button type="button" role="tab" aria-selected={activeTab === "fit"} className={activeTab === "fit" ? "is-active" : ""} onClick={() => setActiveTab("fit")}>
-            <strong>骑行设定</strong>
-          </button>
           <button type="button" role="tab" aria-selected={activeTab === "components"} className={activeTab === "components" ? "is-active" : ""} onClick={() => setActiveTab("components")}>
             <strong>车身配件</strong>
+          </button>
+          <button type="button" role="tab" aria-selected={activeTab === "fit"} className={activeTab === "fit" ? "is-active" : ""} onClick={() => setActiveTab("fit")}>
+            <strong>骑行设定</strong>
           </button>
         </div>
       </header>
 
       <div className="side-panel__scroll" role="tabpanel" aria-label={activeTab === "fit" ? "骑行设定" : "车身配件"}>
-        {activeTab === "fit"
-          ? <FitSetupEditor fitSetup={fitSetup} updateFitSetup={updateFitSetup} />
-          : <ComponentsEditor componentSetup={componentSetup} updateComponentSetup={updateComponentSetup} />}
+        {activeTab === "components"
+          ? <ComponentsEditor componentSetup={componentSetup} updateComponentSetup={updateComponentSetup} />
+          : <FitSetupEditor fitSetup={fitSetup} updateFitSetup={updateFitSetup} />}
       </div>
 
       <footer><span className="status-dot" /> 骑行设定与配件选择已保留</footer>

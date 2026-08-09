@@ -3,15 +3,16 @@ import rearRotor from "../../../assets/bikeTemplates/endurance/rear-rotor.svg";
 import seatpost from "../../../assets/bikeTemplates/endurance/seatpost.svg";
 import saddle from "../../../assets/bikeTemplates/endurance/saddle.svg";
 import spacer from "../../../assets/bikeTemplates/endurance/spacer.svg";
-import handlebar from "../../../assets/bikeTemplates/endurance/handlebar.svg";
-import fork from "../../../assets/bikeTemplates/endurance/fork.svg";
-import frameDownTube from "../../../assets/bikeTemplates/endurance/frame-down-tube.svg";
-import frameTopTube from "../../../assets/bikeTemplates/endurance/frame-top-tube.svg";
-import frameHeadTube from "../../../assets/bikeTemplates/endurance/frame-head-tube.svg";
-import frameChainstay from "../../../assets/bikeTemplates/endurance/frame-chainstay.svg";
-import frameSeatstay from "../../../assets/bikeTemplates/endurance/frame-seatstay.svg";
-import frameSeatTube from "../../../assets/bikeTemplates/endurance/frame-seat-tube.svg";
-import frameBottomBracket from "../../../assets/bikeTemplates/endurance/frame-bottom-bracket.svg";
+import handlebarHood from "../../../assets/bikeTemplates/endurance/handlebar-hood.svg";
+import handlebarTapeSource from "../../../assets/bikeTemplates/endurance/handlebar-tape.svg?raw";
+import forkSource from "../../../assets/bikeTemplates/endurance/fork.svg?raw";
+import frameDownTubeSource from "../../../assets/bikeTemplates/endurance/frame-down-tube.svg?raw";
+import frameTopTubeSource from "../../../assets/bikeTemplates/endurance/frame-top-tube.svg?raw";
+import frameHeadTubeSource from "../../../assets/bikeTemplates/endurance/frame-head-tube.svg?raw";
+import frameChainstaySource from "../../../assets/bikeTemplates/endurance/frame-chainstay.svg?raw";
+import frameSeatstaySource from "../../../assets/bikeTemplates/endurance/frame-seatstay.svg?raw";
+import frameSeatTubeSource from "../../../assets/bikeTemplates/endurance/frame-seat-tube.svg?raw";
+import frameBottomBracketSource from "../../../assets/bikeTemplates/endurance/frame-bottom-bracket.svg?raw";
 import chain from "../../../assets/bikeTemplates/endurance/chain.svg";
 import {
   FIGMA_ENDURANCE_TEMPLATE,
@@ -44,8 +45,9 @@ const figmaShapeScale = wheelDiameter / layers.rearWheel.width;
 const BASE_CRANK_LENGTH_MM = 172.5;
 const PROGRAMMATIC_STEM_THICKNESS_PX = 18;
 const PROGRAMMATIC_STEM_CORNER_RADIUS_PX = 4;
-const PROGRAMMATIC_STEM_LEFT_OVERLAP_PX = 8;
+const PROGRAMMATIC_STEM_LEFT_OVERLAP_PX = 12;
 const FORK_HEAD_GAP_PX = 6;
+const colorizedAssetCache = new Map();
 const assetAnchors = Object.fromEntries(
   Object.keys(FIGMA_ENDURANCE_TEMPLATE.assetAnchors).map((name) => [
     name,
@@ -61,6 +63,15 @@ const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.e),
   Math.abs(matrix.f),
 );
+
+function colorizedSvgAsset(source, sourceFill, color) {
+  const cacheKey = `${sourceFill}:${color}:${source}`;
+  if (colorizedAssetCache.has(cacheKey)) return colorizedAssetCache.get(cacheKey);
+  const colorizedSource = source.replaceAll(`fill="${sourceFill}"`, `fill="${color}"`);
+  const asset = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(colorizedSource)}`;
+  colorizedAssetCache.set(cacheKey, asset);
+  return asset;
+}
 
 function TemplateAsset({ asset, layer, transform, className, renderLayer }) {
   return (
@@ -150,7 +161,7 @@ function ProgrammaticStem({ start, end }) {
       height={PROGRAMMATIC_STEM_THICKNESS_PX}
       rx={PROGRAMMATIC_STEM_CORNER_RADIUS_PX}
       ry={PROGRAMMATIC_STEM_CORNER_RADIUS_PX}
-      fill="#111111"
+      fill="#191919"
       transform={`rotate(${angleDeg} ${start.x} ${start.y})`}
       className="figma-bike__component figma-bike__stem"
       data-stem-visual-source="programmatic-rounded-rect"
@@ -460,6 +471,17 @@ export function EnduranceBikeTemplate({
   motionStopped = false,
 }) {
   const components = componentSetup ?? resolveComponentSetup(DEFAULT_COMPONENT_SETUP);
+  const frameAssets = {
+    downTube: colorizedSvgAsset(frameDownTubeSource, "black", components.frameColor),
+    topTube: colorizedSvgAsset(frameTopTubeSource, "black", components.frameColor),
+    headTube: colorizedSvgAsset(frameHeadTubeSource, "black", components.frameColor),
+    chainstay: colorizedSvgAsset(frameChainstaySource, "black", components.frameColor),
+    seatstay: colorizedSvgAsset(frameSeatstaySource, "black", components.frameColor),
+    seatTube: colorizedSvgAsset(frameSeatTubeSource, "black", components.frameColor),
+    bottomBracket: colorizedSvgAsset(frameBottomBracketSource, "black", components.frameColor),
+  };
+  const forkAsset = colorizedSvgAsset(forkSource, "black", components.forkColor);
+  const handlebarTapeAsset = colorizedSvgAsset(handlebarTapeSource, "#D9D9D9", components.barTapeColor);
   const projected = Object.fromEntries(
     Object.entries(data.anchors).map(([key, point]) => [key, project(point)]),
   );
@@ -738,6 +760,9 @@ export function EnduranceBikeTemplate({
       data-crank-id={components.crank.id}
       data-cassette-id={components.cassette.id}
       data-drivetrain-id={components.drivetrain.id}
+      data-frame-color={components.frameColor}
+      data-fork-color={components.forkColor}
+      data-bar-tape-color={components.barTapeColor}
       data-crank-length-mm={crankLengthMm.toFixed(3)}
       data-crank-visual-base-length={BASE_CRANK_LENGTH_MM}
       data-crank-length-ratio={(crankLengthMm / BASE_CRANK_LENGTH_MM).toFixed(6)}
@@ -791,17 +816,20 @@ export function EnduranceBikeTemplate({
           <TemplateAsset asset={spacer} layer={layers.spacer} transform={spacerMatrix} className="figma-bike__component figma-bike__spacer" />
         )}
         <ProgrammaticStem start={projected.stemSpacerAnchor} end={projected.stemHandlebarAnchor} />
-        <TemplateAsset asset={handlebar} layer={layers.handlebar} transform={handlebarMatrix} className="figma-bike__component figma-bike__handlebar" />
+        <g className="figma-bike__handlebar-assembly" data-handlebar-position-binding="shared-handlebar-matrix">
+          <TemplateAsset asset={handlebarHood} layer={layers.handlebarHood} transform={handlebarMatrix} className="figma-bike__component figma-bike__handlebar figma-bike__handlebar-hood" />
+          <TemplateAsset asset={handlebarTapeAsset} layer={layers.handlebarTape} transform={handlebarMatrix} className="figma-bike__component figma-bike__handlebar figma-bike__handlebar-tape" />
+        </g>
       </g>
-      <TemplateAsset asset={fork} layer={layers.fork} transform={forkMatrix} className="figma-bike__fork" renderLayer="fork" />
-      <g className="figma-bike__frame-stack" data-render-layer="frame">
-        <TemplateAsset asset={frameDownTube} layer={layers.frameDownTube} transform={downTubeMatrix} className="figma-bike__frame-part figma-bike__down-tube" />
-        <TemplateAsset asset={frameTopTube} layer={layers.frameTopTube} transform={topTubeMatrix} className="figma-bike__frame-part figma-bike__top-tube" />
-        <TemplateAsset asset={frameHeadTube} layer={layers.frameHeadTube} transform={headTubeMatrix} className="figma-bike__frame-part figma-bike__head-tube" />
-        <TemplateAsset asset={frameChainstay} layer={layers.frameChainstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__chainstay" />
-        <TemplateAsset asset={frameSeatstay} layer={layers.frameSeatstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seatstay" />
-        <TemplateAsset asset={frameSeatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
-        <TemplateAsset asset={frameBottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
+      <TemplateAsset asset={forkAsset} layer={layers.fork} transform={forkMatrix} className="figma-bike__fork" renderLayer="fork" />
+      <g className="figma-bike__frame-stack" data-render-layer="frame" data-frame-color={components.frameColor}>
+        <TemplateAsset asset={frameAssets.downTube} layer={layers.frameDownTube} transform={downTubeMatrix} className="figma-bike__frame-part figma-bike__down-tube" />
+        <TemplateAsset asset={frameAssets.topTube} layer={layers.frameTopTube} transform={topTubeMatrix} className="figma-bike__frame-part figma-bike__top-tube" />
+        <TemplateAsset asset={frameAssets.headTube} layer={layers.frameHeadTube} transform={headTubeMatrix} className="figma-bike__frame-part figma-bike__head-tube" />
+        <TemplateAsset asset={frameAssets.chainstay} layer={layers.frameChainstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__chainstay" />
+        <TemplateAsset asset={frameAssets.seatstay} layer={layers.frameSeatstay} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seatstay" />
+        <TemplateAsset asset={frameAssets.seatTube} layer={layers.frameSeatTube} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__seat-tube" />
+        <TemplateAsset asset={frameAssets.bottomBracket} layer={layers.frameBottomBracket} transform={frameBodyMatrix} className="figma-bike__frame-part figma-bike__bottom-bracket" />
       </g>
       <TemplateAsset asset={chain} layer={layers.chain} transform={drivetrainMatrix} className="figma-bike__component figma-bike__chain" renderLayer="chain" />
       <TemplateAsset asset={components.drivetrain.visualResource} layer={components.drivetrain.sourceBounds} transform={rearMatrix} className="figma-bike__component figma-bike__drivetrain" renderLayer="drivetrain" />

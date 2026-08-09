@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { geometrySizes } from "../../data/bikes.js";
+import { ColorPalette } from "../ui/ColorPalette.jsx";
 import { SegmentedControl } from "../ui/Stepper.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 
@@ -17,7 +18,7 @@ const geometryDetails = [
   { key: "standoverMm", unit: "mm", zh: "跨高", en: "Standover" },
 ];
 
-export function FrameGeometryPanel({ bike, frameState, setFrameSize, isStageFullscreen = false }) {
+export function FrameGeometryPanel({ bike, frameState, setFrameSize, componentSetup, updateComponentSetup, isStageFullscreen = false }) {
   const sizeData = bike.sizeData;
   const [geometryLanguage, setGeometryLanguage] = useState(() => {
     try {
@@ -56,6 +57,23 @@ export function FrameGeometryPanel({ bike, frameState, setFrameSize, isStageFull
         <PanelSection title="尺码" hint={`已选择 · ${frameState.size}`}>
           <SegmentedControl options={geometrySizes} value={frameState.size} onChange={setFrameSize} />
           <p className="section-note">切换尺码不会改变右侧骑行设定和配件选择。</p>
+        </PanelSection>
+
+        <PanelSection title="车架外观">
+          <div className="frame-appearance__palette">
+            <ColorPalette
+              label="车架颜色"
+              value={componentSetup.frameColor}
+              onChange={(value) => updateComponentSetup("frameColor", value)}
+            />
+          </div>
+          <div className="frame-appearance__palette">
+            <ColorPalette
+              label="前叉颜色"
+              value={componentSetup.forkColor}
+              onChange={(value) => updateComponentSetup("forkColor", value)}
+            />
+          </div>
         </PanelSection>
 
         <PanelSection title="几何摘要" hint="核心参数">
