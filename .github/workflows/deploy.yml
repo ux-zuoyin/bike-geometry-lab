@@ -35,6 +35,8 @@ jobs:
         run: npm ci
 
       - name: Build
+        env:
+          VITE_GEOMETRY_PARSER_ENDPOINT: ${{ vars.VITE_GEOMETRY_PARSER_ENDPOINT }}
         run: npm run build
 
       - name: Upload GitHub Pages artifact
