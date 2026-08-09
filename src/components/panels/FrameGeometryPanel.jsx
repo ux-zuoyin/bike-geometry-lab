@@ -3,7 +3,7 @@ import { geometrySizes } from "../../data/bikes.js";
 import { SegmentedControl } from "../ui/Stepper.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 
-const GEOMETRY_LANGUAGE_STORAGE_KEY = "bike-fit:geometry-language";
+const GEOMETRY_LANGUAGE_STORAGE_KEY = "bike-geometry-lab:geometry-language";
 
 const geometryDetails = [
   { key: "seatTubeLengthMm", unit: "mm", zh: "座管长度", en: "Seat Tube" },

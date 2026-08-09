@@ -1,7 +1,8 @@
 {
-  "name": "fitting",
+  "name": "bike-geometry-lab",
   "version": "0.0.0",
   "private": true,
+  "description": "Desktop road bike geometry, fitting, and component visualization lab.",
   "type": "module",
   "scripts": {
     "dev": "vite",

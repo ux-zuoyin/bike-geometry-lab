@@ -2,7 +2,7 @@
 
 ## 1. Reference Purpose
 
-本目录用于 Bike Geometry Fit 项目中的：
+本目录用于 Bike Geometry Lab 项目中的：
 
 **Endurance / 耐力型公路车标准模板**
 
@@ -1327,7 +1327,7 @@ aero
 
 # 34. Final Product Principle
 
-Bike Geometry Fit 不是：
+Bike Geometry Lab 不是：
 
 > 一个画自行车的网站。
 
