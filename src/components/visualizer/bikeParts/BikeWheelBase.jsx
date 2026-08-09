@@ -1,9 +1,9 @@
-import { PROJECT_SCALE, WHEEL_RADIUS } from "../../../lib/geometry/frameGeometry.js";
+import { PIXELS_PER_MM, WHEEL_RADIUS } from "../../../lib/geometry/frameGeometry.js";
 import { circlePoint } from "../../../lib/bikeVisual/pathGeometry.js";
 import { BikeBrakeDisc } from "./BikeBrakeDisc.jsx";
 
 export function BikeWheelBase({ center, preset, side }) {
-  const radius = WHEEL_RADIUS * PROJECT_SCALE;
+  const radius = WHEEL_RADIUS * PIXELS_PER_MM;
   const rimDepth = preset.wheel.rimDepth;
   const rimCenter = radius - 8 - rimDepth / 2;
   const spokeRadius = radius - rimDepth - 12;

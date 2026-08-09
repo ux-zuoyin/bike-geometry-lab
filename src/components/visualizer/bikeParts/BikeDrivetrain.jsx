@@ -2,7 +2,6 @@ export function BikeDrivetrain({ frame, project }) {
   const bb = project(frame.bb);
   const rear = project(frame.rearAxle);
   const upperRear = { x: rear.x + 2, y: rear.y - 13 };
-  const lowerRear = { x: rear.x + 2, y: rear.y + 13 };
   const upperRing = { x: bb.x - 4, y: bb.y - 27 };
   const lowerRing = { x: bb.x - 4, y: bb.y + 27 };
   const jockeyTop = { x: rear.x - 4, y: rear.y + 29 };

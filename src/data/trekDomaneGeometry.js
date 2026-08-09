@@ -1,5 +1,5 @@
 export const TREK_DOMANE_MODEL_ID = "trek-domane";
-export const TREK_DOMANE_VISUAL_BASE_SIZE = "56";
+export const TREK_DOMANE_VISUAL_BASE_SIZE = "54";
 
 const SOURCE_NOTE = "Extracted from Trek Domane geometry chart provided by user; original length values shown in cm and converted to mm.";
 
@@ -8,7 +8,7 @@ export const trekDomane = {
   brand: "Trek",
   model: "Domane",
   category: "endurance",
-  categoryLabel: "Endurance",
+  categoryLabel: "耐力型",
   visualBaseSize: TREK_DOMANE_VISUAL_BASE_SIZE,
   wheelSize: "700c",
   sourceNote: SOURCE_NOTE,

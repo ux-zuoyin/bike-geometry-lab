@@ -9,7 +9,7 @@ export {
 } from "./trekDomaneGeometry.js";
 
 export const defaultFit = {
-  spacer: 15,
+  spacer: 0,
   stemLength: 90,
   stemAngle: 6,
   saddleHeight: 748,

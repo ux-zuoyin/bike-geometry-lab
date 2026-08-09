@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   bikeCatalog,
   bikeGeometryByModel,
@@ -11,12 +11,25 @@ import {
   trekDomane,
 } from "../src/data/bikes.js";
 import {
-  DEFAULT_WHEELSET_ID,
-  WHEELSET_CENTER,
-  getWheelset,
-  wheelsets,
-} from "../src/config/wheelsets.js";
+  BikeComponents,
+  CASSETTE_CENTER_ANCHOR,
+  DEFAULT_COMPONENT_SETUP,
+  WHEEL_CENTER_ANCHOR,
+  resolveComponentSetup,
+  updateWheelSelection,
+  updateWheelSelectionLink,
+} from "../src/config/bikeComponents.js";
+import { DEFAULT_FIT_SETUP, toGeometryFit } from "../src/config/fitSetup.js";
 import { buildBikeGeometry } from "../src/lib/geometry/index.js";
+import { BASE_COCKPIT_STACK_HEIGHT_MM, HEADSET_STACK_HEIGHT, getEffectiveStemPitch } from "../src/lib/geometry/cockpitGeometry.js";
+import {
+  PIXELS_PER_MM,
+  REFERENCE_WHEEL_OUTER_DIAMETER_MM,
+  RENDERED_WHEEL_DIAMETER_PX,
+  WHEEL_RADIUS,
+  createProjector,
+  getPhysicalScaleAudit,
+} from "../src/lib/geometry/frameGeometry.js";
 import { bikeArchetypes } from "../src/config/bikeArchetypes.js";
 import { taperedTubePath } from "../src/lib/bikeVisual/pathGeometry.js";
 import {
@@ -29,8 +42,11 @@ import {
   FIGMA_ENDURANCE_TEMPLATE,
   affineFromThreePoints,
   applyMatrix,
+  composeMatrices,
+  getHandlebarContactOffsetMm,
   orientedSegmentTransform,
   resolveAssetAnchor,
+  uniformAroundPoint,
 } from "../src/lib/bikeVisual/figmaEnduranceTemplate.js";
 import { getSeatpostVisualAnchors } from "../src/lib/bikeVisual/seatpostGeometry.js";
 import {
@@ -38,6 +54,10 @@ import {
   getRotationAnimation,
   oppositePointAround,
 } from "../src/lib/bikeVisual/previewMotion.js";
+import {
+  PRISM_GROUND_Y_RATIO,
+  getBikeStageGroundAlignment,
+} from "../src/lib/bikeVisual/stageGroundAlignment.js";
 
 const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.a - 1),
@@ -56,7 +76,28 @@ const bikeVisualizerSource = readFileSync(
   new URL("../src/components/visualizer/BikeVisualizer.jsx", import.meta.url),
   "utf8",
 );
+const roadBikeVisualSource = readFileSync(
+  new URL("../src/components/visualizer/bikeParts/RoadBikeVisual.jsx", import.meta.url),
+  "utf8",
+);
+const prismSource = readFileSync(
+  new URL("../src/components/visualizer/Prism.jsx", import.meta.url),
+  "utf8",
+);
+const prismCssSource = readFileSync(
+  new URL("../src/components/visualizer/Prism.css", import.meta.url),
+  "utf8",
+);
 const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const frameBottomBracketSource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/frame-bottom-bracket.svg", import.meta.url),
+  "utf8",
+);
+const forkSource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/fork.svg", import.meta.url),
+  "utf8",
+);
 const framePanelSource = readFileSync(
   new URL("../src/components/panels/FrameGeometryPanel.jsx", import.meta.url),
   "utf8",
@@ -65,10 +106,25 @@ const setupPanelSource = readFileSync(
   new URL("../src/components/panels/BikeSetupPanel.jsx", import.meta.url),
   "utf8",
 );
-const wheelsetVisualsSource = readFileSync(
-  new URL("../src/config/wheelsetVisuals.js", import.meta.url),
+const bikeComponentsSource = readFileSync(
+  new URL("../src/config/bikeComponents.js", import.meta.url),
   "utf8",
 );
+const spacerVisualSource = readFileSync(
+  new URL("../src/assets/bikeTemplates/endurance/spacer.svg", import.meta.url),
+  "utf8",
+);
+
+const readSvgSourcesRecursively = (directoryUrl) => readdirSync(directoryUrl, { withFileTypes: true }).flatMap((entry) => {
+  const entryUrl = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, directoryUrl);
+  if (entry.isDirectory()) return readSvgSourcesRecursively(entryUrl);
+  return entry.name.endsWith(".svg") ? [{ name: entryUrl.pathname, source: readFileSync(entryUrl, "utf8") }] : [];
+});
+
+const bicycleSvgSources = [
+  ...readSvgSourcesRecursively(new URL("../src/assets/bikeTemplates/endurance/", import.meta.url)),
+  ...readSvgSourcesRecursively(new URL("../src/assets/bikeComponents/", import.meta.url)),
+];
 
 test("frame points respect stack and reach", () => {
   const geometry = enduranceGeometrySizes[56];
@@ -82,6 +138,35 @@ test("frame points respect stack and reach", () => {
   assert.ok(bike.frame.headBottom.y < bike.frame.headTop.y, "head tube bottom remains below its top in geometry coordinates");
 });
 
+test("700C outer diameter is the single physical scale for every geometry metric", () => {
+  const geometry = enduranceGeometrySizes[56];
+  const bike = buildBikeGeometry(geometry, defaultFit);
+  const audit = getPhysicalScaleAudit(bike.frame, geometry);
+  const legacyWheelbaseRatio = geometry.wheelbase / 672;
+  const calibratedWheelbaseRatio = (geometry.wheelbase * PIXELS_PER_MM) / RENDERED_WHEEL_DIAMETER_PX;
+
+  assert.equal(REFERENCE_WHEEL_OUTER_DIAMETER_MM, 686);
+  assert.equal(RENDERED_WHEEL_DIAMETER_PX, 275.52);
+  assert.equal(WHEEL_RADIUS, 343);
+  assert.ok(Math.abs(PIXELS_PER_MM - 0.4016326530612245) < 1e-12);
+  assert.ok(Math.abs(legacyWheelbaseRatio - 1.5148809523809523) < 1e-12);
+  assert.ok(Math.abs(calibratedWheelbaseRatio - 1018 / 686) < 1e-12);
+  assert.ok(Math.abs((geometry.stack * PIXELS_PER_MM) / RENDERED_WHEEL_DIAMETER_PX - 591 / 686) < 1e-12);
+  assert.ok(Math.abs((geometry.reach * PIXELS_PER_MM) / RENDERED_WHEEL_DIAMETER_PX - 377 / 686) < 1e-12);
+  assert.ok(Math.abs((geometry.headTube * PIXELS_PER_MM) / RENDERED_WHEEL_DIAMETER_PX - 175 / 686) < 1e-12);
+  for (const metric of audit.measurements) {
+    assert.ok(Math.abs(metric.renderedMm - metric.expectedMm) < 1e-9, `${metric.key} must round-trip through the shared scale`);
+    assert.ok(Math.abs(metric.errorMm) < 1e-9);
+  }
+
+  for (const size of geometrySizes) {
+    const sizedGeometry = enduranceGeometrySizes[size];
+    const sizedBike = buildBikeGeometry(sizedGeometry, defaultFit);
+    const sizedAudit = getPhysicalScaleAudit(sizedBike.frame, sizedGeometry);
+    assert.equal(sizedAudit.pixelsPerMm, PIXELS_PER_MM);
+  }
+});
+
 test("cockpit setting moves handlebar contact point", () => {
   const geometry = enduranceGeometrySizes[56];
   const short = buildBikeGeometry(geometry, { ...defaultFit, stemLength: 90 });
@@ -89,12 +174,169 @@ test("cockpit setting moves handlebar contact point", () => {
   assert.ok(long.contacts.handlebar.x > short.contacts.handlebar.x + 20);
 });
 
+test("Cockpit Geometry follows the steerer axis and uses nominal stem angle", () => {
+  const geometry = enduranceGeometrySizes[56];
+  const spacer0 = buildBikeGeometry(geometry, { ...defaultFit, spacer: 0, stemLength: 90, stemAngle: -12 });
+  const spacer25 = buildBikeGeometry(geometry, { ...defaultFit, spacer: 25, stemLength: 90, stemAngle: -12 });
+  const nearLevel = buildBikeGeometry(geometry, { ...defaultFit, spacer: 0, stemLength: 90, stemAngle: -18 });
+  const zeroAngle = buildBikeGeometry(geometry, { ...defaultFit, spacer: 0, stemLength: 90, stemAngle: 0 });
+
+  assert.equal(HEADSET_STACK_HEIGHT, 45);
+  assert.equal(BASE_COCKPIT_STACK_HEIGHT_MM, 45);
+  assert.equal(DEFAULT_FIT_SETUP.spacerHeight, 0);
+  assert.deepEqual(spacer0.cockpit.spacerHeadtubeAnchor, spacer0.frame.headTop);
+  assert.ok(Math.abs(spacer0.cockpit.stemBase.x - (spacer0.frame.headTop.x - 45 * Math.cos(geometry.headAngle * Math.PI / 180))) < 1e-9);
+  assert.ok(Math.abs(spacer0.cockpit.stemBase.y - (spacer0.frame.headTop.y + 45 * Math.sin(geometry.headAngle * Math.PI / 180))) < 1e-9);
+  assert.deepEqual(spacer0.cockpit.spacerTop, spacer0.cockpit.stemBase);
+  assert.deepEqual(spacer0.cockpit.stemSpacerAnchor, spacer0.cockpit.stemBase);
+  assert.equal(spacer0.cockpit.baseCockpitStackHeight, 45);
+  assert.equal(spacer0.cockpit.totalSpacerStackHeight, 45);
+  assert.deepEqual(spacer0.cockpit.stemHandlebarAnchor, spacer0.cockpit.handlebarClampAnchor);
+  assert.ok(Math.abs(spacer0.cockpit.effectiveStemPitch - 6.1) < 1e-9);
+  assert.ok(Math.abs(nearLevel.cockpit.effectiveStemPitch - 0.1) < 1e-9);
+  assert.ok(Math.abs(zeroAngle.cockpit.effectiveStemPitch - 18.1) < 1e-9);
+
+  const expectedSpacerDelta = {
+    x: -25 * Math.cos(geometry.headAngle * Math.PI / 180),
+    y: 25 * Math.sin(geometry.headAngle * Math.PI / 180),
+  };
+  const actualBaseDelta = {
+    x: spacer25.cockpit.stemBase.x - spacer0.cockpit.stemBase.x,
+    y: spacer25.cockpit.stemBase.y - spacer0.cockpit.stemBase.y,
+  };
+  const actualClampDelta = {
+    x: spacer25.cockpit.handlebarClamp.x - spacer0.cockpit.handlebarClamp.x,
+    y: spacer25.cockpit.handlebarClamp.y - spacer0.cockpit.handlebarClamp.y,
+  };
+  assert.ok(Math.abs(actualBaseDelta.x - expectedSpacerDelta.x) < 1e-9);
+  assert.ok(Math.abs(actualBaseDelta.y - expectedSpacerDelta.y) < 1e-9);
+  assert.deepEqual(actualClampDelta, actualBaseDelta);
+  assert.ok(actualBaseDelta.x < 0, "spacer moves StemBase rearward");
+  assert.ok(actualBaseDelta.y > 0, "spacer moves StemBase upward");
+
+  const stemDistance = Math.hypot(
+    spacer0.cockpit.handlebarClamp.x - spacer0.cockpit.stemBase.x,
+    spacer0.cockpit.handlebarClamp.y - spacer0.cockpit.stemBase.y,
+  );
+  assert.ok(Math.abs(stemDistance - 90) < 1e-9);
+  for (const stemLength of [90, 100, 110]) {
+    const bike = buildBikeGeometry(geometry, { ...defaultFit, stemLength, stemAngle: -12 });
+    const renderedLength = Math.hypot(
+      bike.cockpit.handlebarClamp.x - bike.cockpit.stemBase.x,
+      bike.cockpit.handlebarClamp.y - bike.cockpit.stemBase.y,
+    );
+    assert.ok(Math.abs(renderedLength - stemLength) < 1e-9);
+  }
+  assert.deepEqual(
+    [-6, -12, -18].map((stemAngle) => Number(getEffectiveStemPitch(geometry.headAngle, stemAngle).toFixed(1))),
+    [12.1, 6.1, 0.1],
+  );
+  for (const spacer of [0, 10, 25]) {
+    const bike = buildBikeGeometry(geometry, { ...defaultFit, spacer, stemLength: 90, stemAngle: -12 });
+    assert.deepEqual(bike.cockpit.spacerHeadtubeAnchor, bike.frame.headTop);
+    assert.deepEqual(bike.cockpit.spacerTop, bike.cockpit.stemSpacerAnchor);
+    assert.deepEqual(bike.cockpit.stemHandlebarAnchor, bike.cockpit.handlebarClampAnchor);
+    const totalStack = BASE_COCKPIT_STACK_HEIGHT_MM + spacer;
+    assert.equal(bike.cockpit.totalSpacerStackHeight, totalStack);
+    assert.ok(Math.abs(bike.cockpit.stemBase.x - (bike.frame.headTop.x - totalStack * Math.cos(geometry.headAngle * Math.PI / 180))) < 1e-9);
+    assert.ok(Math.abs(bike.cockpit.stemBase.y - (bike.frame.headTop.y + totalStack * Math.sin(geometry.headAngle * Math.PI / 180))) < 1e-9);
+  }
+  assert.ok(Math.abs(getEffectiveStemPitch(71.9, -12) - 6.1) < 1e-9);
+});
+
+test("the same nominal stem angle uses each size's head tube angle", () => {
+  const pitches = geometrySizes.map((size) => {
+    const bike = buildBikeGeometry(enduranceGeometrySizes[size], { ...defaultFit, stemAngle: -12 });
+    return bike.cockpit.effectiveStemPitch;
+  });
+  assert.deepEqual(pitches.map((pitch) => Number(pitch.toFixed(1))), [7.7, 7.2, 6.7, 6.7, 6.1, 6, 5.9]);
+});
+
+test("the named Cockpit Anchor Contract stays exact for every Domane size", () => {
+  for (const size of geometrySizes) {
+    const bike = buildBikeGeometry(enduranceGeometrySizes[size], {
+      ...defaultFit,
+      spacer: 20,
+      stemLength: 90,
+      stemAngle: -12,
+    });
+    assert.deepEqual(bike.cockpit.spacerHeadtubeAnchor, bike.frame.headTop);
+    assert.deepEqual(bike.cockpit.spacerTop, bike.cockpit.stemSpacerAnchor);
+    assert.deepEqual(bike.cockpit.stemHandlebarAnchor, bike.cockpit.handlebarClampAnchor);
+    assert.ok(Math.abs(Math.hypot(
+      bike.cockpit.stemHandlebarAnchor.x - bike.cockpit.stemSpacerAnchor.x,
+      bike.cockpit.stemHandlebarAnchor.y - bike.cockpit.stemSpacerAnchor.y,
+    ) - 90) < 1e-9);
+  }
+});
+
+test("Stem length deformation fixes A and moves only B / HandlebarClamp", () => {
+  const geometry = enduranceGeometrySizes[54];
+  const project = createProjector();
+  const sourceClamp = resolveAssetAnchor(FIGMA_ENDURANCE_TEMPLATE, "handlebarClampAnchor");
+  let baselineA;
+
+  for (const stemLength of [120, 90, 60]) {
+    const bike = buildBikeGeometry(geometry, {
+      ...defaultFit,
+      spacer: 0,
+      stemLength,
+      stemAngle: -12,
+    });
+    const targetA = project(bike.cockpit.stemSpacerAnchor);
+    const targetB = project(bike.cockpit.stemHandlebarAnchor);
+    const handlebarMatrix = uniformAroundPoint(sourceClamp, project(bike.cockpit.handlebarClampAnchor), RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width);
+    const mappedA = targetA;
+    const mappedB = targetB;
+    const mappedClamp = applyMatrix(handlebarMatrix, sourceClamp);
+    baselineA ??= mappedA;
+
+    assert.ok(Math.hypot(mappedA.x - targetA.x, mappedA.y - targetA.y) < 1e-9);
+    assert.ok(Math.hypot(mappedA.x - baselineA.x, mappedA.y - baselineA.y) < 1e-9);
+    assert.ok(Math.hypot(mappedB.x - targetB.x, mappedB.y - targetB.y) < 1e-9);
+    assert.ok(Math.hypot(mappedClamp.x - mappedB.x, mappedClamp.y - mappedB.y) < 1e-9);
+    assert.ok(Math.abs(Math.hypot(mappedB.x - mappedA.x, mappedB.y - mappedA.y) / PIXELS_PER_MM - stemLength) < 1e-9);
+  }
+});
+
 test("crank length changes pedal without moving bottom bracket", () => {
   const geometry = enduranceGeometrySizes[56];
-  const short = buildBikeGeometry(geometry, { ...defaultFit, crankLength: 165 });
-  const long = buildBikeGeometry(geometry, { ...defaultFit, crankLength: 175 });
-  assert.deepEqual(short.frame.bb, long.frame.bb);
-  assert.notDeepEqual(short.contacts.pedal, long.contacts.pedal);
+  const bikes = [165, 170, 172.5, 175].map((crankLength) => ({
+    crankLength,
+    bike: buildBikeGeometry(geometry, { ...defaultFit, crankLength }),
+  }));
+  for (const { crankLength, bike } of bikes) {
+    assert.deepEqual(bike.frame.bb, { x: 0, y: 0 });
+    assert.ok(Math.abs(Math.hypot(
+      bike.contacts.pedal.x - bike.frame.bb.x,
+      bike.contacts.pedal.y - bike.frame.bb.y,
+    ) - crankLength) < 1e-9);
+
+    const crank = BikeComponents.Crank[0];
+    const sourceBase = {
+      x: crank.sourceBounds.x + crank.visualAnchor.x,
+      y: crank.sourceBounds.y + crank.visualAnchor.y,
+    };
+    const sourcePedal = {
+      x: crank.sourceBounds.x + crank.pedalAnchor.x,
+      y: crank.sourceBounds.y + crank.pedalAnchor.y,
+    };
+    const project = createProjector();
+    const matrix = orientedSegmentTransform(
+      sourceBase,
+      sourcePedal,
+      project(bike.frame.bb),
+      project(bike.contacts.pedal),
+      RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width,
+    );
+    const mappedBase = applyMatrix(matrix, sourceBase);
+    const mappedPedal = applyMatrix(matrix, sourcePedal);
+    const targetBase = project(bike.frame.bb);
+    const targetPedal = project(bike.contacts.pedal);
+    assert.ok(Math.hypot(mappedBase.x - targetBase.x, mappedBase.y - targetBase.y) < 1e-9);
+    assert.ok(Math.hypot(mappedPedal.x - targetPedal.x, mappedPedal.y - targetPedal.y) < 1e-9);
+  }
+  assert.notDeepEqual(bikes[0].bike.contacts.pedal, bikes.at(-1).bike.contacts.pedal);
 });
 
 test("Bike Setup changes contact points and visuals without mutating Frame Geometry", () => {
@@ -138,55 +380,194 @@ test("Trek Domane is the only catalog model and stores all seven sizes in millim
   assert.equal(size56.wheelSize, "700c");
 });
 
-test("Bike Components exposes three paired 700C wheelsets with a shared explicit center anchor", () => {
-  assert.equal(DEFAULT_WHEELSET_ID, "midProfile");
-  assert.deepEqual(WHEELSET_CENTER, { x: 240, y: 240 });
-  assert.deepEqual(wheelsets.map(({ id, name, wheelSize }) => [id, name, wheelSize]), [
-    ["lowProfile", "低框轮组", "700c"],
-    ["midProfile", "中框轮组", "700c"],
-    ["deepProfile", "高框轮组", "700c"],
+test("Bike Components exposes the targeted Figma-backed registries", () => {
+  assert.deepEqual(Object.keys(BikeComponents), ["Wheel", "Tire", "Chainring", "Crank", "Drivetrain", "Cassette"]);
+  assert.equal(DEFAULT_COMPONENT_SETUP.frontWheelId, "midProfile");
+  assert.equal(DEFAULT_COMPONENT_SETUP.rearWheelId, "midProfile");
+  assert.equal(DEFAULT_COMPONENT_SETUP.linkWheelSelection, false);
+  assert.ok(!("wheelId" in DEFAULT_COMPONENT_SETUP));
+  assert.equal(DEFAULT_COMPONENT_SETUP.cassetteId, "default");
+  assert.deepEqual(WHEEL_CENTER_ANCHOR, { x: 240, y: 240 });
+  assert.deepEqual(CASSETTE_CENTER_ANCHOR, { x: 50, y: 50 });
+  assert.deepEqual(BikeComponents.Wheel.map(({ id, name, wheelSize, figmaNodeId }) => [id, name, wheelSize, figmaNodeId]), [
+    ["lowProfile", "低框轮组", "700c", "4:1034"],
+    ["midProfile", "中框轮组", "700c", "4:1033"],
+    ["deepProfile", "高框轮组", "700c", "4:1032"],
+    ["discWheel", "封闭轮", "700c", "4:1889"],
+    ["waveWheel", "波浪轮", "700c", "4:2285"],
+    ["triSpokeWheel", "三刀轮", "700c", "4:2293"],
   ]);
-  assert.equal(getWheelset("unknown").id, DEFAULT_WHEELSET_ID);
-  assert.deepEqual(wheelsets.map(({ figma }) => figma.groupNodeId), ["2:948", "2:979", "2:994"]);
-  assert.match(setupPanelSource, /<h2>车身配件<\/h2>/);
+  assert.ok(BikeComponents.Wheel.every((wheel) => wheel.wheelCenterAnchor === WHEEL_CENTER_ANCHOR));
+  assert.ok(BikeComponents.Wheel.every((wheel) => !("rimDepth" in wheel)));
+  assert.deepEqual(BikeComponents.Wheel.map(({ visualLayers }) => visualLayers.length), [2, 2, 2, 6, 2, 2]);
+  assert.equal(BikeComponents.Tire.length, 4);
+  assert.equal(BikeComponents.Tire.find(({ id }) => id === "roadTan").visualLayers.length, 2);
+  assert.deepEqual(BikeComponents.Tire.find(({ id }) => id === "treadTan").visualLayers.map(({ sourceBounds }) => sourceBounds), [
+    { x: 6, y: 6, width: 468, height: 468 },
+    { x: 0, y: 0, width: 479.996, height: 479.993 },
+  ]);
+  assert.deepEqual(BikeComponents.Chainring.map(({ id, figmaNodeId }) => [id, figmaNodeId]), [
+    ["default", "4:1985"],
+    ["pq", "4:1987"],
+    ["cyber", "4:4436"],
+    ["sram", "4:2008"],
+  ]);
+  assert.deepEqual(BikeComponents.Crank.map(({ id, figmaNodeId }) => [id, figmaNodeId]), [
+    ["shimano105", "4:1936"],
+    ["red", "4:4122"],
+    ["default", "4:1933"],
+  ]);
+  assert.equal(BikeComponents.Drivetrain.length, 2);
+  assert.deepEqual(BikeComponents.Cassette.map(({ id, name, placementAnchor }) => [id, name, placementAnchor]), [
+    ["default", "Shimano飞轮", "rearAxle"],
+    ["sram", "速联飞轮", "rearAxle"],
+  ]);
+  assert.ok(BikeComponents.Cassette.every((resource) => resource.visualAnchor === CASSETTE_CENTER_ANCHOR));
+  assert.deepEqual(BikeComponents.Cassette.map(({ visualLayers }) => visualLayers.length), [7, 8]);
+  assert.ok(BikeComponents.Crank.every((resource) => !("crankLength" in resource)));
+  assert.ok(BikeComponents.Crank.every(({ visualAnchor, pedalAnchor }) => visualAnchor.x === 60 && visualAnchor.y === 40 && pedalAnchor.x === 184 && pedalAnchor.y === 40));
+  assert.ok(BikeComponents.Drivetrain.every(({ placementAnchor, visualAnchor }) => placementAnchor === "rearAxle" && visualAnchor.x === 53 && visualAnchor.y === -14));
+  assert.deepEqual(Object.keys(DEFAULT_COMPONENT_SETUP), [
+    "frontWheelId",
+    "rearWheelId",
+    "linkWheelSelection",
+    "tireId",
+    "chainringVisualId",
+    "crankVisualId",
+    "cassetteId",
+    "drivetrainVisualId",
+  ]);
+  assert.equal(DEFAULT_COMPONENT_SETUP.crankVisualId, "shimano105");
+  assert.match(setupPanelSource, /<h2>自行车设定<\/h2>/);
 });
 
-test("wheelset visuals replace only the paired Figma wheel assets and stay axle-driven", () => {
-  for (const assetName of [
-    "wheel-low-profile.svg",
-    "wheel-mid-profile.svg",
-    "wheel-deep-profile-front.svg",
-    "wheel-deep-profile-rear.svg",
-  ]) {
+test("Wheel and Tire stay split, registry-driven, and axle-centered", () => {
+  for (const assetName of ["low.svg", "mid.svg", "deep.svg", "disc.svg", "disc-mask.svg", "wave.svg", "trispoke.svg", "trispoke-inner.svg"]) {
     const source = readFileSync(
-      new URL(`../src/assets/bikeTemplates/endurance/${assetName}`, import.meta.url),
+      new URL(`../src/assets/bikeComponents/wheel/${assetName}`, import.meta.url),
       "utf8",
     );
     assert.match(source, /viewBox="0 0 480 480"/);
+    assert.doesNotMatch(source, /#1E1E1E/);
   }
-  assert.match(wheelsetVisualsSource, /lowProfile: \{[\s\S]*front: lowProfileWheel,[\s\S]*rear: lowProfileWheel/);
-  assert.match(wheelsetVisualsSource, /midProfile: \{[\s\S]*front: midProfileWheel,[\s\S]*rear: midProfileWheel/);
-  assert.match(wheelsetVisualsSource, /deepProfile: \{[\s\S]*front: deepProfileFrontWheel,[\s\S]*rear: deepProfileRearWheel/);
+  const resolved = resolveComponentSetup({ ...DEFAULT_COMPONENT_SETUP, frontWheelId: "deepProfile", rearWheelId: "midProfile" });
+  assert.equal(resolved.frontWheel.id, "deepProfile");
+  assert.equal(resolved.rearWheel.id, "midProfile");
+  assert.match(bikeComponentsSource, /visualResource: wheelLow/);
   assert.match(enduranceTemplateSource, /const center = project\(axle\)/);
   assert.match(enduranceTemplateSource, /data-wheel-center-source="geometry-axle"/);
-  assert.match(enduranceTemplateSource, /asset=\{wheelVisual\.rear\}/);
-  assert.match(enduranceTemplateSource, /asset=\{wheelVisual\.front\}/);
+  assert.match(enduranceTemplateSource, /const wheelLayers = wheel\.visualLayers \?\?/);
+  assert.match(enduranceTemplateSource, /wheelLayers\.map\(\(wheelLayer, index\)/);
+  assert.match(enduranceTemplateSource, /const tireLayers = tire\.visualLayers \?\?/);
+  assert.match(enduranceTemplateSource, /tireLayers\.map\(\(tireLayer, index\)/);
+  assert.doesNotMatch(enduranceTemplateSource, /wheelVisual\.rear|wheelVisual\.front/);
   assert.match(enduranceTemplateSource, /asset=\{frontRotor\}/);
   assert.match(enduranceTemplateSource, /asset=\{rearRotor\}/);
 });
 
-test("Frame State and Bike Setup are independent sources of truth", () => {
+test("front and rear wheel selections remain independent unless linking is explicitly enabled", () => {
+  const independentFromFront = updateWheelSelection({ ...DEFAULT_COMPONENT_SETUP, rearWheelId: "deepProfile" }, "front", "triSpokeWheel");
+  assert.equal(independentFromFront.frontWheelId, "triSpokeWheel");
+  assert.equal(independentFromFront.rearWheelId, "deepProfile");
+
+  const independentFromRear = updateWheelSelection({ ...independentFromFront, rearWheelId: "deepProfile" }, "rear", "discWheel");
+  assert.equal(independentFromRear.frontWheelId, "triSpokeWheel");
+  assert.equal(independentFromRear.rearWheelId, "discWheel");
+
+  const linked = updateWheelSelectionLink(independentFromRear, true);
+  assert.equal(linked.frontWheelId, "triSpokeWheel");
+  assert.equal(linked.rearWheelId, "discWheel");
+
+  const linkedFromFront = updateWheelSelection(linked, "front", "deepProfile");
+  assert.equal(linkedFromFront.frontWheelId, "deepProfile");
+  assert.equal(linkedFromFront.rearWheelId, "deepProfile");
+
+  const linkedFromRear = updateWheelSelection(linked, "rear", "lowProfile");
+  assert.equal(linkedFromRear.frontWheelId, "lowProfile");
+  assert.equal(linkedFromRear.rearWheelId, "lowProfile");
+
+  const unlinked = updateWheelSelectionLink(linkedFromFront, false);
+  const triSpokeFront = updateWheelSelection(unlinked, "front", "triSpokeWheel");
+  const mixed = updateWheelSelection(triSpokeFront, "rear", "discWheel");
+  const resolvedMixed = resolveComponentSetup(mixed);
+  assert.equal(resolvedMixed.frontWheel.id, "triSpokeWheel");
+  assert.equal(resolvedMixed.rearWheel.id, "discWheel");
+  assert.equal(resolvedMixed.frontWheel, BikeComponents.Wheel.find(({ id }) => id === "triSpokeWheel"));
+  assert.equal(resolvedMixed.rearWheel, BikeComponents.Wheel.find(({ id }) => id === "discWheel"));
+
+  const relinked = updateWheelSelectionLink(mixed, true);
+  assert.equal(relinked.frontWheelId, "triSpokeWheel");
+  assert.equal(relinked.rearWheelId, "discWheel");
+
+  assert.match(setupPanelSource, /className="wheel-matrix" aria-label="前后轮轮组选择器"/);
+  assert.match(setupPanelSource, /<WheelCell side="rear" wheel=\{wheel\} value=\{componentSetup\.rearWheelId\}/);
+  assert.match(setupPanelSource, /<WheelCell side="front" wheel=\{wheel\} value=\{componentSetup\.frontWheelId\}/);
+  assert.ok(setupPanelSource.indexOf('<WheelCell side="rear"') < setupPanelSource.indexOf('<WheelCell side="front"'));
+  assert.match(setupPanelSource, /后 \$\{rearWheel\.name\}  \/  前 \$\{frontWheel\.name\}/);
+  assert.match(setupPanelSource, /aria-pressed=\{isSelected\}/);
+  assert.match(setupPanelSource, /wheel-matrix__summary/);
+  assert.doesNotMatch(setupPanelSource, /WheelCenter → FrontAxle|WheelCenter → RearAxle|SELECTED/);
+  assert.match(setupPanelSource, /label="前后轮联动"/);
+  assert.match(setupPanelSource, /updateComponentSetup\("linkWheelSelection", value\)/);
+  assert.ok(setupPanelSource.indexOf('action={(') < setupPanelSource.indexOf('className="wheel-matrix__summary"'));
+  assert.match(enduranceTemplateSource, /wheel=\{components\.frontWheel\}/);
+  assert.match(enduranceTemplateSource, /wheel=\{components\.rearWheel\}/);
+  assert.equal((enduranceTemplateSource.match(/<FixedWheel /g) ?? []).length, 2);
+  assert.doesNotMatch(enduranceTemplateSource, /FrontWheelComponent|RearWheelComponent/);
+});
+
+test("Cassette is registry-driven, RearAxle-centered, and synchronized with rear-wheel motion", () => {
+  const resolved = resolveComponentSetup({ ...DEFAULT_COMPONENT_SETUP, cassetteId: "sram" });
+  assert.equal(resolved.cassette.id, "sram");
+  assert.equal(resolved.cassette.placementAnchor, "rearAxle");
+  assert.equal(resolved.cassette.visualAnchor, CASSETTE_CENTER_ANCHOR);
+  assert.match(enduranceTemplateSource, /const cassetteTransform = uniformAroundPoint\(cassette\.visualAnchor, center, figmaShapeScale\)/);
+  assert.match(enduranceTemplateSource, /<FixedCassette cassette=\{components\.cassette\} center=\{projected\.rearAxle\}/);
+  assert.match(enduranceTemplateSource, /data-cassette-center-source="geometry-rear-axle"/);
+  assert.match(enduranceTemplateSource, /durationSeconds=\{PREVIEW_MOTION_CONFIG\.wheelDurationSeconds\}[\s\S]*syncGroup="wheels"/);
+  assert.match(setupPanelSource, /updateComponentSetup\("cassetteId", value\)/);
+  assert.doesNotMatch(enduranceTemplateSource, /bikeTemplates\/endurance\/cassette\.svg/);
+});
+
+test("Frame, Fit Setup, and Component Setup are independent sources of truth", () => {
   assert.match(appSource, /const \[frameState, setFrameState\] = useState\(\{/);
   assert.match(appSource, /bikeId: trekDomane\.id,[\s\S]*size: trekDomane\.visualBaseSize/);
-  assert.match(appSource, /const \[bikeSetup, setBikeSetup\] = useState\(\{[\s\S]*\.\.\.defaultFit,[\s\S]*wheelset: DEFAULT_WHEELSET_ID/);
+  assert.match(appSource, /const \[fitSetup, setFitSetup\] = useState\(\{ \.\.\.DEFAULT_FIT_SETUP \}\)/);
+  assert.match(appSource, /const \[componentSetup, setComponentSetup\] = useState\(\{ \.\.\.DEFAULT_COMPONENT_SETUP \}\)/);
   assert.match(appSource, /const sizeData = getTrekDomaneSize\(frameState\.size\)/);
   assert.match(appSource, /const setFrameSize = \(size\) => setFrameState/);
-  assert.match(appSource, /const updateBikeSetup = \(key, value\) => setBikeSetup/);
-  assert.match(appSource, /<BikeVisualizer bike=\{bike\} fit=\{bikeSetup\} wheelset=\{wheelset\} \/>/);
-  assert.match(setupPanelSource, /role="radiogroup" aria-label="轮组类型"/);
-  assert.match(setupPanelSource, /updateBikeSetup\("wheelset", wheelset\.id\)/);
-  assert.doesNotMatch(appSource, /setBikeSetup\([^\n]*frameState/);
-  assert.doesNotMatch(appSource, /setFrameState\([^\n]*bikeSetup/);
+  assert.match(appSource, /const updateFitSetup = \(key, value\) => setFitSetup/);
+  assert.match(appSource, /const updateComponentSetup = \(key, value\) => setComponentSetup/);
+  assert.match(appSource, /<BikeVisualizer[\s\S]*bike=\{bike\}[\s\S]*fit=\{fit\}[\s\S]*componentSetup=\{resolvedComponentSetup\}[\s\S]*\/>/);
+  assert.match(appSource, /if \(key === "frontWheelId"\) return updateWheelSelection\(current, "front", value\)/);
+  assert.match(appSource, /if \(key === "rearWheelId"\) return updateWheelSelection\(current, "rear", value\)/);
+  assert.match(setupPanelSource, /stateKey = side === "front" \? "frontWheelId" : "rearWheelId"/);
+  assert.doesNotMatch(appSource, /setFitSetup\([^\n]*frameState|setComponentSetup\([^\n]*frameState/);
+  assert.doesNotMatch(appSource, /setFrameState\([^\n]*(fitSetup|componentSetup)/);
+});
+
+test("Fit Setup and Crank Visual remain independent across the requested scenarios", () => {
+  const fit170 = { ...DEFAULT_FIT_SETUP, spacerHeight: 15, stemLength: 90, saddleHeight: 775, crankLength: 170 };
+  const components105 = {
+    ...DEFAULT_COMPONENT_SETUP,
+    frontWheelId: "deepProfile",
+    rearWheelId: "deepProfile",
+    crankVisualId: "shimano105",
+    drivetrainVisualId: "shimano",
+  };
+  const resolved105 = resolveComponentSetup(components105);
+  assert.equal(toGeometryFit(fit170).crankLength, 170);
+  assert.equal(resolved105.crank.id, "shimano105");
+
+  const fit172 = { ...fit170, crankLength: 172.5 };
+  assert.equal(toGeometryFit(fit172).crankLength, 172.5);
+  assert.equal(resolveComponentSetup(components105).crank.id, "shimano105");
+
+  const geometry = enduranceGeometrySizes[56];
+  const stem100 = buildBikeGeometry(geometry, toGeometryFit({ ...fit170, stemLength: 100 }));
+  const stem90 = buildBikeGeometry(geometry, toGeometryFit({ ...fit170, stemLength: 90 }));
+  assert.deepEqual(stem100.geometry, stem90.geometry);
+  assert.notDeepEqual(stem100.contacts.handlebar, stem90.contacts.handlebar);
 });
 
 test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without module navigation", () => {
@@ -208,10 +589,191 @@ test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without
   ]) {
     assert.ok(framePanelSource.includes(label));
   }
-  for (const title of ["轮组", "把组", "坐垫 / 座杆", "曲柄"]) {
+  for (const title of ["轮组", "外胎", "牙盘组", "曲柄", "飞轮", "变速套件"]) {
     assert.ok(setupPanelSource.includes(`title="${title}"`));
   }
-  assert.match(appSource, /aria-label=\{isSetupPanelOpen \? "隐藏配件面板" : "显示配件面板"\}/);
+  for (const title of ["把组", "坐垫", "曲柄长度"]) {
+    assert.ok(setupPanelSource.includes(`title="${title}"`));
+  }
+  for (const forbidden of ["坐垫 / 座杆", "Stem", "Handlebar", "Seatpost", "Cassette", "Rotor"]) {
+    assert.ok(!setupPanelSource.includes(`title="${forbidden}"`));
+  }
+  assert.match(setupPanelSource, /useState\("fit"\)/);
+  assert.match(setupPanelSource, />骑行设定</);
+  assert.match(setupPanelSource, />车身配件</);
+  for (const fitField of ["垫圈高度", "把立长度", "把立角度", "坐垫高度", "坐垫后移", "曲柄长度 mm"]) {
+    assert.ok(setupPanelSource.includes(fitField));
+  }
+  assert.doesNotMatch(appSource, /isSetupPanelOpen|隐藏设定|显示设定|aria-label="关于"|aria-label="帮助"/);
+});
+
+test("stage fullscreen replaces local zoom controls and preserves the mounted workspace", () => {
+  assert.match(appSource, /const \[isStageFullscreen, setIsStageFullscreen\] = useState\(false\)/);
+  assert.match(appSource, /workspace--stage-fullscreen/);
+  assert.match(appSource, /event\.key === "Escape"/);
+  assert.match(appSource, /isStageFullscreen=\{isStageFullscreen\}/);
+  assert.match(bikeVisualizerSource, /全屏观看/);
+  assert.match(bikeVisualizerSource, /退出全屏/);
+  assert.match(bikeVisualizerSource, /CornersOut/);
+  assert.match(bikeVisualizerSource, /CornersIn/);
+  assert.doesNotMatch(bikeVisualizerSource, /MagnifyingGlass|Crosshair|setZoom|zoom-tools|requestFullscreen/);
+  assert.match(stylesSource, /\.workspace\.workspace--stage-fullscreen\s*\{[^}]*grid-template-columns:\s*0 minmax\(0, 1fr\) 0/);
+  assert.match(stylesSource, /\.workspace--stage-fullscreen \.frame-panel\s*\{[^}]*translateX\(-100%\)/);
+  assert.match(stylesSource, /\.workspace--stage-fullscreen \.setup-panel\s*\{[^}]*translateX\(100%\)/);
+  assert.match(stylesSource, /\.workspace--stage-fullscreen \.canvas-tools\s*\{[^}]*left:\s*50%/);
+  assert.match(stylesSource, /--stage-card-duration:\s*300ms/);
+  assert.match(stylesSource, /--stage-card-stagger:\s*70ms/);
+  assert.match(stylesSource, /--stage-sidebar-duration:\s*520ms/);
+  assert.match(stylesSource, /--stage-center-duration:\s*650ms/);
+  assert.match(stylesSource, /transition-delay:\s*160ms/);
+  assert.match(stylesSource, /transition-delay:\s*calc\(140ms \+ var\(--stagger-index/);
+  assert.match(stylesSource, /--stage-motion-easing:\s*cubic-bezier\(\.22,1,\.36,1\)/);
+  assert.match(stylesSource, /\.stage-fullscreen-control\s*\{[^}]*border:\s*0;[^}]*outline:\s*0;/);
+  assert.doesNotMatch(stylesSource, /\.stage-fullscreen-control:hover\s*\{[^}]*border/);
+  assert.match(stylesSource, /--stagger-index:\s*6/);
+  assert.match(stylesSource, /translateX\(-20px\) scale\(\.985\)/);
+  assert.match(stylesSource, /translateX\(20px\) scale\(\.985\)/);
+  assert.doesNotMatch(appSource, /setTimeout|setInterval/);
+  assert.match(stylesSource, /prefers-reduced-motion:[^)]*reduce[\s\S]*transition-duration:\s*\.01ms !important/);
+});
+
+test("the workspace uses the supplied official Prism without site-side lighting effects", () => {
+  assert.match(appSource, /import Prism from "\.\/components\/visualizer\/Prism\.jsx"/);
+  assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
+  assert.match(appSource, /<Prism[\s\S]*animationType="rotate"[\s\S]*timeScale=\{0\.3\}[\s\S]*height=\{6\.4\}[\s\S]*baseWidth=\{5\.7\}[\s\S]*scale=\{2\.4\}[\s\S]*hueShift=\{0\}[\s\S]*colorFrequency=\{1\}[\s\S]*noise=\{0\}[\s\S]*glow=\{0\.7\}[\s\S]*transparent[\s\S]*\/>/);
+  assert.doesNotMatch(appSource, /StageSpotlight|className="stage-ground|stage-cone|stage-light|bloom=/);
+  assert.doesNotMatch(bikeVisualizerSource, /<Prism|prism-background/);
+  assert.match(prismSource, /from "ogl"/);
+  assert.match(prismSource, /new ResizeObserver/);
+  assert.match(prismSource, /prefers-reduced-motion: reduce/);
+  assert.match(prismSource, /cancelAnimationFrame/);
+  assert.match(prismSource, /container\.removeChild\(gl\.canvas\)/);
+  assert.match(prismCssSource, /pointer-events:\s*none/);
+  assert.match(stylesSource, /\.workspace-prism-background\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*0;[^}]*overflow:\s*hidden;[^}]*pointer-events:\s*none;/);
+  assert.match(stylesSource, /\.bike-canvas\s*\{[^}]*z-index:\s*2;/);
+  assert.doesNotMatch(stylesSource, /\.(?:stage-product-lighting|stage-prism-cone|stage-cone-core|stage-cone-beams|stage-cone-warmth|stage-ground-light|stage-light-falloff)/);
+  assert.doesNotMatch(stylesSource, /\.workspace-prism-background\s*\{[^}]*(?:gradient|mask|filter|mix-blend-mode|clip-path)/);
+});
+
+test("Prism is one full Workspace background instead of a Bike Visualizer child", () => {
+  const workspaceStart = appSource.indexOf('<main className={`workspace');
+  const prismIndex = appSource.indexOf('<div className="workspace-prism-background"', workspaceStart);
+  const leftPanelIndex = appSource.indexOf('<FrameGeometryPanel', workspaceStart);
+  const centerStageIndex = appSource.indexOf('<div className="main-stage">', workspaceStart);
+  const rightPanelIndex = appSource.indexOf('<BikeSetupPanel', workspaceStart);
+
+  assert.ok(workspaceStart >= 0 && workspaceStart < prismIndex && prismIndex < leftPanelIndex && leftPanelIndex < centerStageIndex && centerStageIndex < rightPanelIndex);
+  assert.equal(appSource.match(/<Prism\b/g)?.length, 1);
+  assert.doesNotMatch(bikeVisualizerSource, /<Prism|workspace-prism-background|prism-background/);
+  assert.match(stylesSource, /\.workspace\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;[^}]*background:\s*var\(--app-bg\);/);
+  assert.match(stylesSource, /\.main-stage\s*\{[^}]*background:\s*transparent;/);
+  assert.match(stylesSource, /\.visualizer\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;/);
+  assert.match(stylesSource, /\.canvas-wrap\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(prismSource, /new ResizeObserver/);
+});
+
+test("Bike Stage aligns both 700C wheel contact points to one responsive Prism ground baseline", () => {
+  const project = createProjector();
+  const wheelOuterRadius = RENDERED_WHEEL_DIAMETER_PX / 2;
+  const stageLayouts = [
+    { stageWidth: 1109, stageHeight: 945 },
+    { stageWidth: 1781, stageHeight: 945 },
+    { stageWidth: 640, stageHeight: 760 },
+  ];
+
+  for (const size of geometrySizes) {
+    const geometry = enduranceGeometrySizes[size];
+    const bike = buildBikeGeometry(geometry, defaultFit);
+    const rearWheelBottomY = project(bike.frame.rearAxle).y + wheelOuterRadius;
+    const frontWheelBottomY = project(bike.frame.frontAxle).y + wheelOuterRadius;
+
+    assert.ok(Math.abs(frontWheelBottomY - rearWheelBottomY) < 1e-9, `size ${size} wheels share one unshifted ground`);
+
+    for (const layout of stageLayouts) {
+      const alignment = getBikeStageGroundAlignment({ ...layout, bikeGroundY: rearWheelBottomY });
+      const shiftedRearBottomY = rearWheelBottomY + alignment.stageTranslateY;
+      const shiftedFrontBottomY = frontWheelBottomY + alignment.stageTranslateY;
+      const shiftedGroundYPx = shiftedRearBottomY * alignment.stageScale + alignment.viewBoxOffsetY;
+
+      assert.ok(Math.abs(shiftedRearBottomY - alignment.stageGroundY) < 1e-9);
+      assert.ok(Math.abs(shiftedFrontBottomY - alignment.stageGroundY) < 1e-9);
+      assert.ok(Math.abs(shiftedGroundYPx - layout.stageHeight * PRISM_GROUND_Y_RATIO) < 1e-9);
+    }
+  }
+
+  assert.match(bikeVisualizerSource, /new ResizeObserver\(updateStageSize\)/);
+  assert.match(bikeVisualizerSource, /const bikeGroundY = rearAxle\.y \+ wheelOuterRadius/);
+  assert.match(bikeVisualizerSource, /<g className="stage-content" transform=\{`translate\(0 \$\{groundAlignment\.stageTranslateY\}\)`\}>/);
+  assert.match(bikeVisualizerSource, /className="stage-content"[\s\S]*<BikeLayer[\s\S]*className="dimensions"[\s\S]*className="bb-origin"/);
+  assert.doesNotMatch(bikeVisualizerSource, /getBBox\(|FrontWheel translateY|RearWheel translateY/);
+  assert.match(stylesSource, /\.bike-canvas\s*\{[^}]*overflow:\s*visible;/);
+});
+
+test("Bike reflection is a literal 20% BikeVisualOnly mirror around the responsive ground baseline", () => {
+  const reflectionIndex = bikeVisualizerSource.indexOf('className="bike-reflection"');
+  const mainBikeIndex = bikeVisualizerSource.indexOf('<g className="stage-content"');
+
+  assert.ok(reflectionIndex >= 0 && reflectionIndex < mainBikeIndex, "reflection paints before the main bike content");
+  assert.match(bikeVisualizerSource, /const REFLECTION_OPACITY = 0\.2/);
+  assert.match(bikeVisualizerSource, /const REFLECTION_GAP_PX = 2/);
+  assert.match(bikeVisualizerSource, /const reflectionGap = REFLECTION_GAP_PX \/ groundAlignment\.stageScale/);
+  assert.match(bikeVisualizerSource, /function BikeVisualOnly\([\s\S]*showFigmaAnchors=\{false\}[\s\S]*showContactPoints=\{false\}/);
+  assert.match(bikeVisualizerSource, /`translate\(0 \$\{reflectionGap\}\)`[\s\S]*`translate\(0 \$\{groundAlignment\.stageGroundY\}\)`[\s\S]*"scale\(1 -1\)"[\s\S]*`translate\(0 \$\{-groundAlignment\.stageGroundY\}\)`/);
+  assert.match(bikeVisualizerSource, /data-reflection-gap-px=\{REFLECTION_GAP_PX\}/);
+  assert.match(bikeVisualizerSource, /className="bike-reflection"[\s\S]*opacity=\{REFLECTION_OPACITY\}[\s\S]*data-reflection-source="BikeVisualOnly"[\s\S]*data-reflection-transform="scaleY\(-1\)"[\s\S]*<BikeVisualOnly/);
+  assert.match(stylesSource, /\.bike-reflection\s*\{[^}]*pointer-events:\s*none;/);
+  assert.doesNotMatch(bikeVisualizerSource, /REFLECTION_(?:BLUR|SATURATION|BRIGHTNESS|HEIGHT|MAX)|reflectionCanvasRef|bike-reflection-canvas/);
+  assert.doesNotMatch(stylesSource, /\.bike-reflection[^}]*?(?:filter|mask|gradient|blur|brightness|saturate)/s);
+  assert.match(roadBikeVisualSource, /showContactPoints = true/);
+  assert.match(enduranceTemplateSource, /showContactPoints && <PedalContactMarker/);
+  assert.match(enduranceTemplateSource, /showContactPoints && \([\s\S]*<HandlebarContactMarker/);
+  assert.doesNotMatch(bikeVisualizerSource.slice(reflectionIndex, mainBikeIndex), /<ContactPoint|<DimensionLine|<AngleIndicator|<GeometrySkeleton|bb-origin/);
+});
+
+test("bicycle resources render without SVG or CSS shadow effects", () => {
+  for (const asset of bicycleSvgSources) {
+    assert.doesNotMatch(
+      asset.source,
+      /<filter\b|filter=|feDropShadow|feGaussianBlur|feOffset|inner[-_ ]?shadow|drop[-_ ]?shadow/i,
+      `${asset.name} must remain free of resource-owned shadow filters`,
+    );
+  }
+
+  assert.doesNotMatch(stylesSource, /\.figma-bike[^}]*drop-shadow\(/s);
+  assert.doesNotMatch(stylesSource, /\.figma-bike[^}]*box-shadow\s*:/s);
+  assert.doesNotMatch(stylesSource, /\.figma-bike[^}]*text-shadow\s*:/s);
+  assert.match(stylesSource, /\.figma-bike-template image\s*\{[^}]*filter:\s*brightness\(1\.13\) contrast\(1\.08\);/);
+  assert.match(stylesSource, /\.figma-bike__wheel,[\s\S]*?\.figma-bike__tire\s*\{[^}]*filter:\s*brightness\(1\.38\) contrast\(\.86\);/);
+  assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
+});
+
+test("production frame, bottom bracket, and fork preserve the current Figma palette", () => {
+  assert.match(frameBottomBracketSource, /fill="#CDCDCD"/);
+  assert.doesNotMatch(frameBottomBracketSource, /#121684|#3A37BF|#5552FE|#9598FF/i);
+  assert.match(forkSource, /<path[^>]*fill="#CDCDCD"/);
+  assert.match(forkSource, /<circle[^>]*fill="#878787"/);
+  assert.doesNotMatch(forkSource, /#121684|#3A37BF|#5552FE|#9598FF/i);
+  assert.match(stylesSource, /\.figma-bike-template \.figma-bike__frame,[\s\S]*?\.figma-bike-template \.figma-bike__fork\s*\{[^}]*filter:\s*none;/);
+});
+
+test("sidebar and visualizer header shells stay fully transparent without removing inner cards", () => {
+  for (const selector of ["side-panel", "frame-panel", "setup-panel", "panel-heading", "visualizer__header"]) {
+    const rule = new RegExp(`\\.${selector}\\s*\\{[^}]*background:\\s*transparent;[^}]*box-shadow:\\s*none;[^}]*backdrop-filter:\\s*none;`, "s");
+    assert.match(stylesSource, rule, `${selector} outer shell must be transparent and effect-free`);
+  }
+
+  assert.match(stylesSource, /\.side-panel::before,[\s\S]*?\.visualizer__header::after\s*\{[^}]*display:\s*none;[^}]*content:\s*none;/);
+  assert.match(stylesSource, /\.control-section\s*\{[^}]*background:\s*var\(--surface\);/);
+  assert.match(stylesSource, /\.setup-tabs\s*\{[^}]*background:\s*var\(--surface-raised\);/);
+  assert.match(bikeVisualizerSource, /<div className="visualizer__header">[\s\S]*TREK|<div className="visualizer__header">[\s\S]*bike\.brand\.toUpperCase/);
+  assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
+});
+
+test("only left Frame Geometry cards receive the restrained internal light bloom", () => {
+  assert.match(stylesSource, /\.frame-panel \.control-section\s*\{[^}]*position:\s*relative;[^}]*overflow:\s*hidden;[^}]*isolation:\s*isolate;/);
+  assert.match(stylesSource, /\.frame-panel \.control-section::before\s*\{[^}]*content:\s*"";[^}]*border-radius:\s*inherit;[^}]*pointer-events:\s*none;[^}]*radial-gradient\([^}]*filter:\s*blur\(36px\);[^}]*opacity:\s*\.14;/);
+  assert.match(stylesSource, /\.frame-panel \.control-section > \*\s*\{[^}]*z-index:\s*1;/);
+  assert.doesNotMatch(stylesSource, /\.setup-panel \.control-section::before/);
 });
 
 test("all Trek Domane source rows preserve the supplied normalized geometry fields", () => {
@@ -258,22 +820,33 @@ test("the product schema adapter drives the geometry layer without leaking unitl
   assert.deepEqual(bike.anchors.bottomBracket, { x: 0, y: 0 });
 });
 
-test("Endurance visual deltas are explicitly calibrated against size 56", () => {
-  assert.equal(ENDURANCE_VISUAL_BASE_SIZE, "56");
-  assert.equal(ENDURANCE_VISUAL_BASE_GEOMETRY.stack, 591);
-  assert.equal(ENDURANCE_VISUAL_BASE_GEOMETRY.reach, 377);
-  assert.equal(ENDURANCE_VISUAL_BASE_GEOMETRY.headTube, 175);
-  assert.equal(ENDURANCE_VISUAL_BASE_GEOMETRY.headAngle, 71.9);
-  assert.equal(ENDURANCE_VISUAL_BASE_GEOMETRY.wheelbase, 1018);
+test("Endurance visual deltas are explicitly calibrated against size 54", () => {
+  assert.equal(ENDURANCE_VISUAL_BASE_SIZE, "54");
+  assert.deepEqual(ENDURANCE_VISUAL_BASE_GEOMETRY, {
+    wheel: "700c",
+    seatTube: 500,
+    seatAngle: 73.7,
+    headTube: 160,
+    headAngle: 71.3,
+    effectiveTopTube: 542,
+    bbDrop: 80,
+    chainstay: 420,
+    forkRake: 53,
+    trail: 59,
+    wheelbase: 1010,
+    standover: 754,
+    reach: 374,
+    stack: 575,
+  });
 
   const expected = {
-    44: { stack: -81, reach: -17, headTube: -80, headAngle: -1.6, wheelbase: -35, scale: 95 / 175 },
-    49: { stack: -51, reach: -9, headTube: -52, headAngle: -1.1, wheelbase: -17, scale: 123 / 175 },
-    52: { stack: -30, reach: -6, headTube: -30, headAngle: -0.6, wheelbase: -15, scale: 145 / 175 },
-    54: { stack: -16, reach: -3, headTube: -15, headAngle: -0.6, wheelbase: -8, scale: 160 / 175 },
-    56: { stack: 0, reach: 0, headTube: 0, headAngle: 0, wheelbase: 0, scale: 1 },
-    58: { stack: 20, reach: 3, headTube: 20, headAngle: 0.1, wheelbase: 4, scale: 195 / 175 },
-    61: { stack: 55, reach: 8, headTube: 60, headAngle: 0.2, wheelbase: 20, scale: 235 / 175 },
+    44: { stack: -65, reach: -14, headTube: -65, headAngle: -1, seatTube: -110, seatAngle: 0.9, effectiveTopTube: -35, wheelbase: -27, chainstay: 0, bbDrop: 0, forkRake: 0, trail: 7, standover: -97, scale: 95 / 160 },
+    49: { stack: -35, reach: -6, headTube: -37, headAngle: -0.5, seatTube: -60, seatAngle: 0.9, effectiveTopTube: -26, wheelbase: -9, chainstay: 5, bbDrop: 0, forkRake: 0, trail: 7, standover: -37, scale: 123 / 160 },
+    52: { stack: -14, reach: -3, headTube: -15, headAngle: 0, seatTube: -25, seatAngle: 0.5, effectiveTopTube: -12, wheelbase: -7, chainstay: 0, bbDrop: 0, forkRake: 0, trail: 0, standover: -19, scale: 145 / 160 },
+    54: { stack: 0, reach: 0, headTube: 0, headAngle: 0, seatTube: 0, seatAngle: 0, effectiveTopTube: 0, wheelbase: 0, chainstay: 0, bbDrop: 0, forkRake: 0, trail: 0, standover: 0, scale: 1 },
+    56: { stack: 16, reach: 3, headTube: 15, headAngle: 0.6, seatTube: 25, seatAngle: -0.4, effectiveTopTube: 12, wheelbase: 8, chainstay: 0, bbDrop: -2, forkRake: -5, trail: 2, standover: 22, scale: 175 / 160 },
+    58: { stack: 36, reach: 6, headTube: 35, headAngle: 0.7, seatTube: 48, seatAngle: -0.7, effectiveTopTube: 25, wheelbase: 12, chainstay: 5, bbDrop: -2, forkRake: -5, trail: 1, standover: 42, scale: 195 / 160 },
+    61: { stack: 71, reach: 11, headTube: 75, headAngle: 0.8, seatTube: 76, seatAngle: -1, effectiveTopTube: 44, wheelbase: 28, chainstay: 5, bbDrop: -5, forkRake: -5, trail: 4, standover: 88, scale: 235 / 160 },
   };
   for (const size of geometrySizes) {
     const delta = getEnduranceVisualDelta(enduranceGeometrySizes[size]);
@@ -281,15 +854,23 @@ test("Endurance visual deltas are explicitly calibrated against size 56", () => 
     assert.equal(delta.reach, expected[size].reach);
     assert.equal(delta.headTube, expected[size].headTube);
     assert.ok(Math.abs(delta.headAngle - expected[size].headAngle) < 1e-9);
+    assert.equal(delta.seatTube, expected[size].seatTube);
+    assert.ok(Math.abs(delta.seatAngle - expected[size].seatAngle) < 1e-9);
+    assert.equal(delta.effectiveTopTube, expected[size].effectiveTopTube);
     assert.equal(delta.wheelbase, expected[size].wheelbase);
+    assert.equal(delta.chainstay, expected[size].chainstay);
+    assert.equal(delta.bbDrop, expected[size].bbDrop);
+    assert.equal(delta.forkRake, expected[size].forkRake);
+    assert.equal(delta.trail, expected[size].trail);
+    assert.equal(delta.standover, expected[size].standover);
     assert.ok(Math.abs(delta.headTubeScale - expected[size].scale) < 1e-9);
   }
 });
 
-test("size 56 produces identity local delta transforms for every split frame part", () => {
+test("size 54 produces identity local delta transforms for every split frame part", () => {
   const bike = buildBikeGeometry(ENDURANCE_VISUAL_BASE_GEOMETRY, defaultFit);
   const projected = Object.fromEntries(
-    Object.entries(bike.anchors).map(([key, point]) => [key, { x: 430 + point.x * 0.41, y: 420 - point.y * 0.41 }]),
+    Object.entries(bike.anchors).map(([key, point]) => [key, createProjector()(point)]),
   );
   const bodyDelta = affineFromThreePoints(
     [projected.bottomBracket, projected.rearAxle, projected.seatTubeTop],
@@ -328,7 +909,7 @@ test("endurance head tube anchors use each size's real length and angle", () => 
 test("Figma split frame body mapping keeps BB, rear axle and seat cluster authoritative", () => {
   const geometry = enduranceGeometrySizes[54];
   const bike = buildBikeGeometry(geometry, defaultFit);
-  const projected = Object.fromEntries(Object.entries(bike.anchors).map(([key, point]) => [key, { x: 430 + point.x * 0.41, y: 420 - point.y * 0.41 }]));
+  const projected = Object.fromEntries(Object.entries(bike.anchors).map(([key, point]) => [key, createProjector()(point)]));
   const source = FIGMA_ENDURANCE_TEMPLATE.anchors;
   const matrix = affineFromThreePoints(
     [source.bottomBracket, source.rearAxle, source.seatTubeTop],
@@ -357,13 +938,22 @@ test("Figma endurance frame uses the new semantic split nodes", () => {
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frame, undefined);
 });
 
-test("Endurance SVG keeps the chainring and drive crank above every production part", () => {
+test("Fork visual leaves a 6px axial head gap while keeping FrontAxle exact", () => {
+  assert.match(enduranceTemplateSource, /const FORK_HEAD_GAP_PX = 6/);
+  assert.match(enduranceTemplateSource, /forkAxisDelta\.x \/ forkAxisLength \* FORK_HEAD_GAP_PX/);
+  assert.match(enduranceTemplateSource, /forkAxisDelta\.y \/ forkAxisLength \* FORK_HEAD_GAP_PX/);
+  assert.match(enduranceTemplateSource, /assetAnchors\.forkTop,[\s\S]*assetAnchors\.forkAxle,[\s\S]*forkVisualTop,[\s\S]*projected\.frontAxle/);
+  assert.match(enduranceTemplateSource, /data-fork-head-gap-px=\{FORK_HEAD_GAP_PX\}/);
+  assert.match(enduranceTemplateSource, /data-fork-axle-error-px=\{forkAxleErrorPx\.toFixed\(9\)\}/);
+});
+
+test("Endurance SVG keeps non-drive crank behind wheels and drive crank in front", () => {
   const renderOrderTokens = [
+    'renderLayer="non-drive-crank"',
     'renderLayer="front-rotor"',
     'renderLayer="rear-rotor"',
-    'renderLayer="cassette"',
-    'renderLayer="non-drive-crank"',
     'renderLayer="rear-wheel"',
+    'renderLayer="cassette"',
     'renderLayer="front-wheel"',
     'renderLayer="seatpost"',
     'renderLayer="saddle"',
@@ -371,7 +961,7 @@ test("Endurance SVG keeps the chainring and drive crank above every production p
     'renderLayer="fork"',
     'data-render-layer="frame"',
     'renderLayer="chain"',
-    'renderLayer="derailleur"',
+    'renderLayer="drivetrain"',
     'renderLayer="chainring"',
     'renderLayer="drive-crank"',
     "{showFigmaAnchors && (",
@@ -385,7 +975,7 @@ test("Endurance SVG keeps the chainring and drive crank above every production p
   assert.match(enduranceTemplateSource, /user-prioritized chainring and drive crank render above all production parts\./);
 });
 
-test("preview motion is permanently enabled, infinitely looping, and based on 50 RPM cadence", () => {
+test("preview motion starts enabled, stays infinitely looping, and can pause from the canvas controls", () => {
   assert.equal(PREVIEW_MOTION_CONFIG.cadenceRpm, 50);
   assert.equal(PREVIEW_MOTION_CONFIG.wheelRpm, 62.5);
   assert.equal(PREVIEW_MOTION_CONFIG.wheelDurationSeconds, 0.96);
@@ -396,10 +986,28 @@ test("preview motion is permanently enabled, infinitely looping, and based on 50
     from: "0 430 420",
     to: "360 430 420",
   });
-  assert.match(enduranceTemplateSource, /data-preview-motion="always-on"/);
+  assert.match(enduranceTemplateSource, /data-preview-motion=\{motionStopped \? "stopped" : "running"\}/);
   assert.match(enduranceTemplateSource, /repeatCount="indefinite"/);
   assert.doesNotMatch(enduranceTemplateSource, /motionEnabled/);
-  assert.doesNotMatch(bikeVisualizerSource, /Preview Motion/);
+  assert.match(bikeVisualizerSource, /<Switch label="停止动画" checked=\{isMotionStopped\}/);
+  assert.match(bikeVisualizerSource, /data-motion-stopped=\{isMotionStopped\}/);
+  assert.match(bikeVisualizerSource, /canvas\.pauseAnimations\?\.\(\)/);
+  assert.match(bikeVisualizerSource, /canvas\.unpauseAnimations\?\.\(\)/);
+  assert.doesNotMatch(enduranceTemplateSource, /\{!isStopped && \(/);
+  assert.match(enduranceTemplateSource, /renderLayer="drive-crank"[\s\S]*<PedalContactMarker point=\{projected\.pedalAnchor\} \/>/);
+  assert.doesNotMatch(enduranceTemplateSource, /showFigmaAnchors && <PedalContactMarker/);
+  assert.doesNotMatch(bikeVisualizerSource, /<ContactPoint point=\{data\.contacts\.pedal\}/);
+  assert.match(enduranceTemplateSource, /data-crank-visual-base-length=\{BASE_CRANK_LENGTH_MM\}/);
+  assert.match(enduranceTemplateSource, /data-crank-length-ratio=\{\(crankLengthMm \/ BASE_CRANK_LENGTH_MM\)\.toFixed\(6\)\}/);
+});
+
+test("chainring preserves its Figma phase relationship with the drive crank", () => {
+  assert.match(enduranceTemplateSource, /const crankSourceAngleDeg = Math\.atan2\(/);
+  assert.match(enduranceTemplateSource, /const crankTargetAngleDeg = Math\.atan2\(/);
+  assert.match(enduranceTemplateSource, /const chainringCrankAlignmentAngleDeg = crankTargetAngleDeg - crankSourceAngleDeg/);
+  assert.match(enduranceTemplateSource, /transform=\{`rotate\(\$\{chainringCrankAlignmentAngleDeg\} \$\{projected\.bottomBracket\.x\} \$\{projected\.bottomBracket\.y\}\)`\}/);
+  assert.match(enduranceTemplateSource, /data-chainring-alignment-source="drive-crank-axis"/);
+  assert.match(enduranceTemplateSource, /renderLayer="chainring" syncGroup="crankset"[\s\S]*renderLayer="drive-crank" syncGroup="crankset"/);
 });
 
 test("non-drive crank starts exactly opposite the drive crank and shares its rotation cycle", () => {
@@ -410,10 +1018,41 @@ test("non-drive crank starts exactly opposite the drive crank and shares its rot
   assert.equal(drivePedal.x - bb.x, -(nonDrivePedal.x - bb.x));
   assert.equal(drivePedal.y - bb.y, -(nonDrivePedal.y - bb.y));
   assert.match(enduranceTemplateSource, /phaseOffset=\{180\} renderLayer="non-drive-crank" syncGroup="crankset"/);
+  assert.match(enduranceTemplateSource, /data-non-drive-crank-mirror="scaleX\(-1\)"/);
+
+  const crank = BikeComponents.Crank.find(({ id }) => id === "red");
+  const sourceBb = {
+    x: crank.sourceBounds.x + crank.visualAnchor.x,
+    y: crank.sourceBounds.y + crank.visualAnchor.y,
+  };
+  const sourcePedal = {
+    x: crank.sourceBounds.x + crank.pedalAnchor.x,
+    y: crank.sourceBounds.y + crank.pedalAnchor.y,
+  };
+  const mirrorAxisX = crank.sourceBounds.x + crank.sourceBounds.width / 2;
+  const localMirror = { a: -1, b: 0, c: 0, d: 1, e: mirrorAxisX * 2, f: 0 };
+  const mirroredSourceBb = applyMatrix(localMirror, sourceBb);
+  const mirroredSourcePedal = applyMatrix(localMirror, sourcePedal);
+
+  for (const crankLengthMm of [165, 170, 172.5, 175]) {
+    const targetPedal = { x: bb.x - crankLengthMm * PIXELS_PER_MM, y: bb.y };
+    const placement = orientedSegmentTransform(mirroredSourceBb, mirroredSourcePedal, bb, targetPedal, 0.574);
+    const mirrored = composeMatrices(placement, localMirror);
+    const mappedBase = applyMatrix(mirrored, sourceBb);
+    const mappedPedal = applyMatrix(mirrored, sourcePedal);
+
+    assert.ok(Math.abs(mappedBase.x - bb.x) < 1e-9);
+    assert.ok(Math.abs(mappedBase.y - bb.y) < 1e-9);
+    assert.ok(Math.abs(mappedPedal.x - targetPedal.x) < 1e-9);
+    assert.ok(Math.abs(mappedPedal.y - targetPedal.y) < 1e-9);
+    assert.ok(mirrored.a * mirrored.d - mirrored.b * mirrored.c < 0, "non-drive visual transform must remain mirrored");
+    assert.ok(Math.abs(Math.hypot(mappedPedal.x - mappedBase.x, mappedPedal.y - mappedBase.y) / PIXELS_PER_MM - crankLengthMm) < 1e-9);
+  }
+  assert.match(enduranceTemplateSource, /asset=\{components\.crank\.visualResource\} layer=\{components\.crank\.sourceBounds\} transform=\{nonDriveCrankMatrix\}/);
 });
 
 test("Figma component connection anchors remain exact for all seven Domane sizes", () => {
-  const visualScale = (336 * 2 * 0.41) / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
+  const visualScale = RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
   const asset = Object.fromEntries(
     Object.keys(FIGMA_ENDURANCE_TEMPLATE.assetAnchors).map((name) => [
       name,
@@ -424,7 +1063,7 @@ test("Figma component connection anchors remain exact for all seven Domane sizes
   for (const size of geometrySizes) {
     const bike = buildBikeGeometry(enduranceGeometrySizes[size], defaultFit);
     const projected = Object.fromEntries(
-      Object.entries(bike.anchors).map(([key, point]) => [key, { x: 430 + point.x * 0.41, y: 420 - point.y * 0.41 }]),
+      Object.entries(bike.anchors).map(([key, point]) => [key, createProjector()(point)]),
     );
     const sourceFrame = FIGMA_ENDURANCE_TEMPLATE.anchors;
     const frameBodyMatrix = affineFromThreePoints(
@@ -444,6 +1083,15 @@ test("Figma component connection anchors remain exact for all seven Domane sizes
       saddleVisualReference: projected.saddleVisualAnchor,
       saddleContactReference: projected.saddleContactPoint,
     });
+    const forkAxisDelta = {
+      x: projected.frontAxle.x - parent.headBottom.x,
+      y: projected.frontAxle.y - parent.headBottom.y,
+    };
+    const forkAxisLength = Math.hypot(forkAxisDelta.x, forkAxisDelta.y);
+    const forkVisualTop = {
+      x: parent.headBottom.x + forkAxisDelta.x / forkAxisLength * 6,
+      y: parent.headBottom.y + forkAxisDelta.y / forkAxisLength * 6,
+    };
     const mappings = [
       {
         sourceStart: asset.seatpostBottom,
@@ -452,15 +1100,9 @@ test("Figma component connection anchors remain exact for all seven Domane sizes
         targetEnd: seatpostAnchors.seatpostTop,
       },
       {
-        sourceStart: asset.stemBase,
-        sourceEnd: asset.stemClamp,
-        targetStart: parent.headTop,
-        targetEnd: projected.stemEnd,
-      },
-      {
         sourceStart: asset.forkTop,
         sourceEnd: asset.forkAxle,
-        targetStart: parent.headBottom,
+        targetStart: forkVisualTop,
         targetEnd: projected.frontAxle,
       },
       {
@@ -498,6 +1140,136 @@ test("Figma component connection anchors remain exact for all seven Domane sizes
     }
     assert.ok(seatpostAnchors.axisError < 1e-9);
     assert.ok(seatpostAnchors.exposedLength > 0);
+  }
+});
+
+test("Figma cockpit visuals follow the physical Spacer → Stem → Handlebar chain", () => {
+  assert.match(enduranceTemplateSource, /assetAnchors\.spacerHeadtubeAnchor,[\s\S]*assetAnchors\.spacerVisualAxisEnd,[\s\S]*projected\.spacerHeadtubeAnchor,[\s\S]*projected\.spacerTop/);
+  assert.match(enduranceTemplateSource, /<ProgrammaticStem start=\{projected\.stemSpacerAnchor\} end=\{projected\.stemHandlebarAnchor\} \/>/);
+  assert.match(enduranceTemplateSource, /<rect[\s\S]*width=\{length \+ PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}[\s\S]*rx=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}[\s\S]*ry=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}/);
+  assert.doesNotMatch(enduranceTemplateSource, /strokeLinecap="round"|programmatic-capsule/);
+  assert.doesNotMatch(enduranceTemplateSource, /stem\.svg|stemMatrix|layers\.stem|assetAnchors\.stem/);
+  assert.match(enduranceTemplateSource, /const handlebarMatrix = uniformAroundPoint\([\s\S]*assetAnchors\.handlebarClampAnchor,[\s\S]*projected\.handlebarClampAnchor,[\s\S]*figmaShapeScale/);
+  assert.doesNotMatch(enduranceTemplateSource, /assetAnchors\.(stemBase|stemClamp|handlebarClamp)\b/);
+  assert.match(enduranceTemplateSource, /totalSpacerStackHeight > 0[\s\S]*asset=\{spacer\}/);
+  assert.match(enduranceTemplateSource, /const handlebarContactPoint = applyMatrix\(handlebarMatrix, sourceAnchors\.handlebarAnchor\)/);
+  assert.match(enduranceTemplateSource, /<HandlebarContactMarker point=\{handlebarContactPoint\} \/>/);
+  assert.doesNotMatch(enduranceTemplateSource, /showFigmaAnchors && <HandlebarContactMarker/);
+  assert.ok(enduranceTemplateSource.indexOf('renderLayer="drive-crank"') < enduranceTemplateSource.indexOf('data-render-layer="contact-points"'));
+  assert.doesNotMatch(bikeVisualizerSource, /<ContactPoint point=\{data\.contacts\.handlebar\}/);
+  assert.match(enduranceTemplateSource, /data-effective-stem-pitch=\{data\.cockpit\.effectiveStemPitch\.toFixed\(1\)\}/);
+  assert.match(enduranceTemplateSource, /data-stem-base-displacement-px=\{stemBaseDisplacementPx\.toFixed\(9\)\}/);
+  assert.match(enduranceTemplateSource, /data-stem-rendered-length-mm=\{stemRenderedLengthMm\.toFixed\(6\)\}/);
+  assert.match(enduranceTemplateSource, /data-handlebar-clamp-error-px=\{handlebarClampErrorPx\.toFixed\(9\)\}/);
+  assert.match(bikeVisualizerSource, /<GeometrySkeleton anchors=\{data\.anchors\} cockpit=\{data\.cockpit\}/);
+  const skeletonSource = readFileSync(new URL("../src/components/visualizer/GeometrySkeleton.jsx", import.meta.url), "utf8");
+  for (const label of ["SpacerHeadtubeAnchor", "SpacerTop", "StemSpacerAnchor", "StemHandlebarAnchor", "HandlebarClampAnchor", "H", "Effective Pitch "]) assert.ok(skeletonSource.includes(label));
+});
+
+test("Spacer height maps the complete Cockpit assembly and Figma hood contact together", () => {
+  const asset = Object.fromEntries(
+    Object.keys(FIGMA_ENDURANCE_TEMPLATE.assetAnchors).map((name) => [
+      name,
+      resolveAssetAnchor(FIGMA_ENDURANCE_TEMPLATE, name),
+    ]),
+  );
+  const geometry = enduranceGeometrySizes[56];
+  const project = createProjector();
+  const baseBike = buildBikeGeometry(geometry, {
+    ...defaultFit,
+    spacer: 0,
+    stemLength: 120,
+    stemAngle: -12,
+  });
+  const hoodOffset = getHandlebarContactOffsetMm();
+  const visualScale = RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
+
+  for (const spacer of [0, 10, 25, 60]) {
+    const bike = buildBikeGeometry(geometry, { ...defaultFit, spacer, stemLength: 120, stemAngle: -12 });
+    assert.deepEqual(bike.cockpit.spacerBottom, bike.frame.headTop);
+    assert.deepEqual(bike.cockpit.spacerTop, bike.cockpit.stemBase);
+    assert.deepEqual(bike.cockpit.stemHandlebarAnchor, bike.cockpit.handlebarClampAnchor);
+    assert.ok(Math.abs(Math.hypot(
+      bike.cockpit.stemHandlebarAnchor.x - bike.cockpit.stemBase.x,
+      bike.cockpit.stemHandlebarAnchor.y - bike.cockpit.stemBase.y,
+    ) - 120) < 1e-9);
+    assert.ok(Math.abs(bike.contacts.handlebar.x - bike.cockpit.handlebarClampAnchor.x - hoodOffset.x) < 1e-9);
+    assert.ok(Math.abs(bike.contacts.handlebar.y - bike.cockpit.handlebarClampAnchor.y - hoodOffset.y) < 1e-9);
+
+    const projected = Object.fromEntries(Object.entries(bike.anchors).map(([key, point]) => [key, project(point)]));
+    const handlebarMatrix = uniformAroundPoint(asset.handlebarClampAnchor, projected.handlebarClampAnchor, visualScale);
+    assert.deepEqual(projected.stemSpacerAnchor, projected.spacerTop);
+    const visualHood = applyMatrix(handlebarMatrix, FIGMA_ENDURANCE_TEMPLATE.anchors.handlebarAnchor);
+    const expectedHood = project(bike.contacts.handlebar);
+    assert.ok(Math.hypot(visualHood.x - expectedHood.x, visualHood.y - expectedHood.y) < 1e-9);
+
+    assert.equal(bike.cockpit.totalSpacerStackHeight, BASE_COCKPIT_STACK_HEIGHT_MM + spacer);
+    const spacerMatrix = orientedSegmentTransform(asset.spacerHeadtubeAnchor, asset.spacerVisualAxisEnd, projected.spacerHeadtubeAnchor, projected.spacerTop, visualScale);
+    assert.ok(Math.hypot(
+      applyMatrix(spacerMatrix, asset.spacerHeadtubeAnchor).x - projected.spacerHeadtubeAnchor.x,
+      applyMatrix(spacerMatrix, asset.spacerHeadtubeAnchor).y - projected.spacerHeadtubeAnchor.y,
+    ) < 1e-9);
+    assert.ok(Math.hypot(
+      applyMatrix(spacerMatrix, asset.spacerVisualAxisEnd).x - projected.spacerTop.x,
+      applyMatrix(spacerMatrix, asset.spacerVisualAxisEnd).y - projected.spacerTop.y,
+    ) < 1e-9);
+  }
+  assert.deepEqual(baseBike.cockpit.spacerBottom, baseBike.frame.headTop);
+});
+
+test("Figma Cockpit keeps Spacer and Handlebar resources while Stem is programmatic", () => {
+  assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.layers.spacer, {
+    nodeId: "1:282",
+    x: 1148,
+    y: 313,
+    width: 127,
+    height: 106,
+  });
+  assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.spacerHeadtubeAnchor, {
+    layer: "spacer",
+    nodeId: "4:3786",
+    x: 19,
+    y: 28,
+  });
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.stem, undefined);
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.stemSpacerAnchor, undefined);
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.stemHandlebarAnchor, undefined);
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.stemBase, undefined);
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.stemClamp, undefined);
+  assert.match(spacerVisualSource, /width="127" height="106" viewBox="0 0 127 106"/);
+  assert.match(spacerVisualSource, /id="Vector 12"/);
+  assert.match(spacerVisualSource, /fill="#4C4C4C"/);
+  assert.match(enduranceTemplateSource, /data-stem-visual-source="programmatic-rounded-rect"/);
+  assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_THICKNESS_PX = 18/);
+  assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_CORNER_RADIUS_PX = 4/);
+  assert.match(enduranceTemplateSource, /const PROGRAMMATIC_STEM_LEFT_OVERLAP_PX = 8/);
+  assert.match(enduranceTemplateSource, /data-stem-left-overlap-px=\{PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}/);
+});
+
+test("persistent H stays on the transformed Figma hood anchor across cockpit fit settings", () => {
+  const visualScale = RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
+  const handlebarClampAnchor = resolveAssetAnchor(FIGMA_ENDURANCE_TEMPLATE, "handlebarClampAnchor");
+  const project = createProjector();
+
+  for (const stemLength of [60, 90, 120]) {
+    for (const stemAngle of [-12, 6, 17]) {
+      for (const spacer of [0, 25, 45]) {
+        const bike = buildBikeGeometry(enduranceGeometrySizes[56], {
+          ...defaultFit,
+          stemLength,
+          stemAngle,
+          spacer,
+        });
+        const handlebarMatrix = uniformAroundPoint(
+          handlebarClampAnchor,
+          project(bike.cockpit.handlebarClampAnchor),
+          visualScale,
+        );
+        const visualHood = applyMatrix(handlebarMatrix, FIGMA_ENDURANCE_TEMPLATE.anchors.handlebarAnchor);
+        const expectedHood = project(bike.contacts.handlebar);
+        assert.ok(Math.hypot(visualHood.x - expectedHood.x, visualHood.y - expectedHood.y) < 1e-9);
+      }
+    }
   }
 });
 

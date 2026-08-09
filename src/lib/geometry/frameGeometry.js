@@ -24,10 +24,33 @@ export function getFramePoints(geometry) {
   return points;
 }
 
-export const PROJECT_SCALE = 0.41;
+export const REFERENCE_WHEEL_OUTER_DIAMETER_MM = 686;
+export const RENDERED_WHEEL_DIAMETER_PX = 275.52;
+export const PIXELS_PER_MM = RENDERED_WHEEL_DIAMETER_PX / REFERENCE_WHEEL_OUTER_DIAMETER_MM;
+export const WHEEL_RADIUS = REFERENCE_WHEEL_OUTER_DIAMETER_MM / 2;
 
-export function createProjector({ originX = 430, originY = 420, scale = PROJECT_SCALE } = {}) {
+export function createProjector({ originX = 430, originY = 420, scale = PIXELS_PER_MM } = {}) {
   return ({ x, y }) => ({ x: originX + x * scale, y: originY - y * scale });
 }
 
-export const WHEEL_RADIUS = 336;
+const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+
+export function getPhysicalScaleAudit(frame, geometry, project = createProjector()) {
+  const projected = Object.fromEntries(Object.entries(frame).map(([key, point]) => [key, project(point)]));
+  const measurements = [
+    { key: "Wheelbase", expectedMm: geometry.wheelbase, renderedPx: distance(projected.rearAxle, projected.frontAxle) },
+    { key: "Stack", expectedMm: geometry.stack, renderedPx: Math.abs(projected.headTop.y - projected.bb.y) },
+    { key: "Reach", expectedMm: geometry.reach, renderedPx: Math.abs(projected.headTop.x - projected.bb.x) },
+    { key: "HeadTube", expectedMm: geometry.headTube, renderedPx: distance(projected.headTop, projected.headBottom) },
+  ].map((metric) => {
+    const renderedMm = metric.renderedPx / PIXELS_PER_MM;
+    return Object.freeze({ ...metric, renderedMm, errorMm: renderedMm - metric.expectedMm });
+  });
+
+  return Object.freeze({
+    referenceWheelDiameterMm: REFERENCE_WHEEL_OUTER_DIAMETER_MM,
+    renderedWheelDiameterPx: RENDERED_WHEEL_DIAMETER_PX,
+    pixelsPerMm: PIXELS_PER_MM,
+    measurements: Object.freeze(measurements),
+  });
+}

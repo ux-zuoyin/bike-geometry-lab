@@ -44,17 +44,3 @@ export function AngleIndicator({ point, project, value, label, align = "start" }
     </g>
   );
 }
-
-export function RiderSkeleton({ points, project }) {
-  const p = Object.fromEntries(Object.entries(points).map(([key, value]) => [key, project(value)]));
-  return (
-    <g className="rider-skeleton">
-      <polyline points={`${p.hip.x},${p.hip.y} ${p.shoulder.x},${p.shoulder.y} ${p.elbow.x},${p.elbow.y} ${p.wrist.x},${p.wrist.y}`} />
-      <polyline points={`${p.hip.x},${p.hip.y} ${p.knee.x},${p.knee.y} ${p.ankle.x},${p.ankle.y}`} />
-      <line x1={p.shoulder.x} y1={p.shoulder.y} x2={p.hip.x} y2={p.hip.y} />
-      {Object.entries(p).map(([key, point]) => <circle key={key} cx={point.x} cy={point.y} r={key === "shoulder" || key === "hip" ? 7 : 5} />)}
-      <text x={p.elbow.x + 10} y={p.elbow.y - 8}>118°</text>
-      <text x={p.knee.x + 10} y={p.knee.y + 4}>142°</text>
-    </g>
-  );
-}

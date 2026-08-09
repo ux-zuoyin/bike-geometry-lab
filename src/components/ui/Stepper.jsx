@@ -22,11 +22,11 @@ export function Stepper({ label, unit, value, step = 1, min = -Infinity, max = I
   );
 }
 
-export function SegmentedControl({ label, options, value, onChange, compact = false }) {
+export function SegmentedControl({ label, options, value, onChange, compact = false, wrap = false }) {
   return (
     <div className="field-block">
       {label && <span className="field-label">{label}</span>}
-      <div className={`segmented ${compact ? "segmented--compact" : ""}`}>
+      <div className={`segmented${compact ? " segmented--compact" : ""}${wrap ? " segmented--wrap" : ""}`}>
         {options.map((option) => {
           const item = typeof option === "object" ? option : { value: option, label: option };
           return (

@@ -9,9 +9,26 @@ import { BikeCrankset } from "./BikeCrankset.jsx";
 import { BikeDrivetrain } from "./BikeDrivetrain.jsx";
 import { EnduranceBikeTemplate } from "../../bike/templates/EnduranceBikeTemplate.jsx";
 
-export function RoadBikeVisual({ data, project, preset, showFigmaAnchors = false, wheelset }) {
+export function RoadBikeVisual({
+  data,
+  project,
+  preset,
+  showFigmaAnchors = false,
+  showContactPoints = true,
+  componentSetup,
+  motionStopped = false,
+}) {
   if (preset.id === "endurance") {
-    return <EnduranceBikeTemplate data={data} project={project} showFigmaAnchors={showFigmaAnchors} wheelset={wheelset} />;
+    return (
+      <EnduranceBikeTemplate
+        data={data}
+        project={project}
+        showFigmaAnchors={showFigmaAnchors}
+        showContactPoints={showContactPoints}
+        componentSetup={componentSetup}
+        motionStopped={motionStopped}
+      />
+    );
   }
 
   return (

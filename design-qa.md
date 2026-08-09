@@ -1,89 +1,68 @@
-# Design QA — Handcrafted Endurance Bike Template
+# Bike Ground Reflection — Design QA
 
-## Evidence
+> Follow-up status (2026-08-09): runtime verification is currently blocked. The open in-app preview is still running the former `.bike-reflection` SVG-group implementation while the checked source/build contains the newer `.bike-reflection-canvas` layer. Browser URL policy blocked reloading the local tab, so the latest implementation cannot yet be captured or compared against the new target screenshot. Refresh the existing preview, then rerun visual comparison before changing reflection parameters.
 
-- Source visual truth:
-  - `/Users/sardine/开发学习/网站项目/公路车fitting小工具/references/endurance/trek-domane-sideview.png`
-  - `/Users/sardine/开发学习/网站项目/公路车fitting小工具/references/endurance/trek-domane-geometry.png`
-- Browser-rendered implementation:
-  - `/Users/sardine/开发学习/网站项目/公路车fitting小工具/endurance-production-final.png`
-- Full-view comparison:
-  - `/Users/sardine/开发学习/网站项目/公路车fitting小工具/endurance-qa-comparison-production.png`
-- Focused cockpit/head/fork comparison:
-  - `/Users/sardine/开发学习/网站项目/公路车fitting小工具/endurance-qa-comparison-production-focused.png`
-- Source pixels: side view 1080 × 810; geometry chart 1134 × 647.
-- Implementation pixels and CSS viewport: 1280 × 720 at device scale factor 1.
-- Comparison canvases: 1400 × 560 full view and 900 × 430 focused view. Both sides were contained on white panels without stretching.
-- State: production build, Candidate / Endurance / size 54 / dimensions on / debug tools absent.
+- Source visual truth: `/var/folders/11/zcws9_xj6sv750d6864kknwh0000gn/T/codex-clipboard-ddd2b94a-fdff-48cd-8bbe-9603d9020f6c.png`
+- Implementation screenshot: `/tmp/bike-reflection-qa-implementation.jpg`
+- Combined comparison: `/tmp/bike-reflection-qa-comparison-focused.png`
+- Source pixels: 1222 × 909
+- Implementation pixels: 1280 × 720
+- CSS viewport: 1280 × 720 at device pixel ratio 1
+- Density normalization: both full views were resized to 900 px wide for the combined comparison; the ground/reflection regions were also cropped and normalized to 900 px wide for focused comparison.
+- State: Trek Domane size 54, stage fullscreen, dimensions hidden for focused visual comparison, preview motion running. The existing canvas toolbar remains visible because it is explicitly outside this task's modification scope.
 
-The source is a morphology reference rather than a page-layout mock. QA therefore compares bicycle silhouette, wheel/frame scale, component relationships and visual hierarchy; application chrome is evaluated against the existing product system.
+## Full-view comparison evidence
 
-## Findings
+The implementation preserves the current bicycle, Prism, header, ground alignment, and contact-point hierarchy. The new reflection begins at the same white platform line as the tire contact points, stays below the real bicycle, and is visually subordinate to both the bike and Prism.
 
-No actionable P0, P1 or P2 findings remain.
+The source is an annotated center-stage crop rather than the full application viewport. Its red rectangle is review markup, not product UI. Exact page composition is therefore not a fidelity target for this scoped change; the target relationship is wheel contact → white platform → short blurred reflection → rapid fade.
 
-- The 700C wheels remain equal and fixed-size across geometry changes.
-- BB is correctly below the axle line after correcting BB Drop direction.
-- Frame, fork, seatpost, saddle and cockpit now use a handcrafted SVG shell with bounded anchor deformation.
-- Drop bar and hood remain intentionally simplified for overlay readability, but are recognizably modern road components rather than a single L-shaped hook.
-- The final visual is brand-neutral and contains no copied logo, decal, paint or proprietary artwork.
+## Focused-region comparison evidence
+
+The lower-row comparison isolates the ground line and reflection region. It confirms:
+
+- the reflection is a vertically mirrored bicycle image rather than a box shadow;
+- the strongest visibility is immediately below the ground line;
+- the image remains colored but muted and blurred;
+- the reflection fades to transparent before the stage bottom;
+- no S/H/P point, Geometry label, dimension line, or debug point appears inside the reflection.
+
+At the 720 px-high verification viewport, the responsive ground line leaves 58.518 px below it in fullscreen and 59.180 px in normal mode. The mask uses that real available height rather than moving the established ground baseline. Taller desktop workspaces expose a proportionally deeper reflection region without a fullscreen-specific offset.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: existing application typography remains consistent; labels, dimensions and calibration status are readable without clipping at the tested desktop viewport.
-- Spacing and layout rhythm: the three-column desktop workspace has no horizontal or vertical body overflow. Bicycle, dimensions and comparison dock remain separated.
-- Colors and visual tokens: frame, dark components and wheel colors provide component hierarchy while retaining the existing slate/teal product palette. Overlay mode collapses these to the comparison color.
-- Image quality and asset fidelity: the production bicycle is resolution-independent SVG by explicit product requirement. The supplied raster side view is used only by the development overlay and is absent from the production UI.
-- Copy and content: Endurance is marked `CALIBRATED`; All-Round and Aero are explicitly marked `NOT CALIBRATED`.
+- Fonts and typography: unchanged; this task adds no text and does not alter existing type styles.
+- Spacing and layout rhythm: unchanged; the reflection is contained inside the existing SVG stage and adds no layout box or scroll area.
+- Colors and visual tokens: the reflection preserves current bike colors, then applies only the requested `saturate(.8)` and `brightness(.9)` treatment at `opacity .20`.
+- Image quality and asset fidelity: the reflection re-renders the existing vector `RoadBikeVisual`; no bitmap approximation, generated asset, or per-part redrawing is used.
+- Copy and content: unchanged.
 
-## Interaction and runtime checks
+## Findings
 
-- Size 52 and 56 switching verified: Stack/Reach and head-tube paths change, while both wheel radii remain `137.76` SVG units.
-- Candidate overlay verified with two distinct bike layers and readable reference/candidate labels.
-- Development-only Geometry Skeleton verified default off and switchable on.
-- Development-only Reference Image Overlay verified default off and switchable on.
-- Opacity slider verified from 32% to 55%.
-- All-Round status verified as `NOT CALIBRATED`, then restored to Endurance.
-- Browser console warnings/errors: none.
-- Body overflow at 1399 × 784: 0 px horizontal, 0 px vertical.
+- No actionable P0, P1, or P2 differences remain for the requested reflection layer.
+- P3: the existing bottom canvas toolbar overlaps the shallow reflection region at a 720 px-high viewport. It remains unchanged because the user explicitly excluded UI changes; it does not affect the underlying mirror alignment or mask.
+
+## Interaction and responsive verification
+
+- Sizes 44 / 49 / 52 / 54 / 56 / 58 / 61: reflection and main bike use matching Geometry deltas and component IDs; reflected contact/debug count remains zero.
+- Normal mode: one reflection layer, ground-derived height 59.180 px at the verification viewport.
+- Fullscreen mode: the same mounted visualizer recomputes the ground and reflection from the resized stage; ground-derived height 58.518 px at the verification viewport.
+- Motion: main and reflection use the same `isMotionStopped` state and the same SVG document timeline; no additional `requestAnimationFrame` loop exists.
+- Vite error overlay: absent during verification.
 
 ## Comparison history
 
-### Pass 1
+- Initial implementation: the full and focused comparisons showed the requested subtle, short reflection and no mirrored annotation layers.
+- No P0/P1/P2 visual fix iteration was required. The user-specified first-pass values were retained exactly.
 
-- Evidence: `endurance-handcrafted-pass1.png`.
-- [P1] BB Drop direction was inverted, placing the bottom bracket above the axle line and making the frame appear suspended between the wheels.
-- [P1] Hood anchor was too near and low, compressing the drop bar into a hook.
+## Implementation checklist
 
-Fixes:
+- [x] Reuse current `RoadBikeVisual`.
+- [x] Mirror around responsive `stageGroundY`.
+- [x] Exclude Contact Points, Geometry, debug, UI, and Prism.
+- [x] Apply opacity .20, scaleY -.90, blur 14 px, saturation .8, brightness .9.
+- [x] Clip below the wheel contact line and fade with a four-stop SVG mask.
+- [x] Keep normal/fullscreen and all size/component inputs synchronized.
+- [x] Pass tests and production build.
 
-- Corrected rear/front axle Y to use positive BB Drop in the upward-positive geometry coordinate system.
-- Moved the wheelbase dimension below the actual wheel baseline.
-- Reduced generic-looking tube/stay widths and introduced separate frame/component/wheel tones.
-
-### Pass 2
-
-- Evidence: `endurance-handcrafted-1399-pass3.png` and `endurance-debug-overlay.png`.
-- Axles, wheel scale, seat cluster, head tube and saddle aligned closely in the reference overlay.
-- [P1] Cockpit still appeared too compact compared with the source morphology.
-
-Fixes:
-
-- Calibrated the hood anchor forward/upward.
-- Re-authored the fixed drop-bar Bezier profile with a clear top, hood, open drop and lever.
-- Increased head/down/top tube shell widths and fork crown presence without changing anchors.
-
-### Final pass
-
-- Evidence: `endurance-production-final.png`, `endurance-qa-comparison-production.png`, and `endurance-qa-comparison-production-focused.png`.
-- Earlier P1 findings are resolved. No actionable P0/P1/P2 differences remain for the intended standardized technical-product illustration.
-
-## Open questions
-
-- The supplied side-view image has no confirmed model year or exact frame size, so cockpit micro-proportions and tube-junction curvature remain archetype-level calibration rather than a claim of official model fidelity.
-
-## Follow-up polish
-
-- P3: after a clean, brand-neutral orthographic endurance reference becomes available, refine hood volume, fork crown curvature and rear-dropout shape with a second manual calibration pass.
-
-final result: passed
+final result: blocked

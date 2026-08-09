@@ -7,8 +7,8 @@ function Metric({ label, reference, candidate, unit = "mm", invert = false }) {
   return (
     <div className="comparison-metric">
       <span>{label}</span>
-      <div><small>REF</small><strong>{reference}</strong></div>
-      <div><small>CAND</small><strong>{candidate}</strong></div>
+      <div><small>基准</small><strong>{reference}</strong></div>
+      <div><small>对比</small><strong>{candidate}</strong></div>
       <em className={Math.abs(delta) <= 8 ? "is-close" : ""}>Δ {delta > 0 ? "+" : ""}{delta} {unit}</em>
     </div>
   );
@@ -22,9 +22,9 @@ export function ComparisonDock({ reference, candidate, fit, onOpenRecommendation
   return (
     <section className="comparison-dock">
       <div className="dock-heading">
-        <span>LIVE COMPARISON</span>
+        <span>实时对比</span>
         <strong>{score}%</strong>
-        <small>geometry match</small>
+        <small>几何对比</small>
       </div>
       <div className="dock-metrics">
         <Metric label="STACK" reference={reference.geometry.stack} candidate={candidate.geometry.stack} />
@@ -33,7 +33,7 @@ export function ComparisonDock({ reference, candidate, fit, onOpenRecommendation
         <Metric label="HEAD TUBE" reference={reference.geometry.headTube} candidate={candidate.geometry.headTube} />
       </div>
       <div className="contact-delta">
-        <span>HANDLEBAR CONTACT</span>
+        <span>把位变化</span>
         <p>X <strong>{contact.x >= 0 ? "+" : ""}{contact.x} mm</strong></p>
         <p>Y <strong>{contact.y >= 0 ? "+" : ""}{contact.y} mm</strong></p>
         <button type="button" onClick={onOpenRecommendation}>查看建议 →</button>
