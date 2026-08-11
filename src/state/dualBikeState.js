@@ -82,10 +82,11 @@ export function updateBikeSize(bike, size) {
 
 export function createBikeFromGeometryImport(currentBike, draft, geometryImage = currentBike.geometryImage ?? null) {
   const selectedImportSizes = getSelectedImportSizes(draft);
+  const geometryValueSource = draft.geometryValueSource === "manual" ? "manual" : "official";
   const geometryBySize = Object.fromEntries(
     selectedImportSizes.map((size) => [
       String(size),
-      importGeometryToSizeData(size, draft.sizes?.[size] ?? draft.candidateSizes?.[size]),
+      importGeometryToSizeData(size, draft.sizes?.[size] ?? draft.candidateSizes?.[size], geometryValueSource),
     ]),
   );
   const sizes = [...selectedImportSizes];
@@ -97,6 +98,8 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
     source: "upload",
     geometryImage,
     importSource: {
+      entryMode: draft.entryMode ?? "ai",
+      geometryValueSource,
       detectedSizes: [...(draft.detectedSizes ?? Object.keys(draft.candidateSizes ?? draft.sizes ?? {}))],
       detectedSizeCount: draft.detectedSizeCount ?? Object.keys(draft.candidateSizes ?? draft.sizes ?? {}).length,
       selectedImportSizes: [...selectedImportSizes],
@@ -110,7 +113,7 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
     model: draft.model.trim() || "未命名车型",
     category: "endurance",
     categoryLabel: "耐力型",
-    sourceLabel: "导入几何数据",
+    sourceLabel: draft.entryMode === "manual" ? "手动几何数据" : "导入几何数据",
     isPreset: false,
     sizes,
     geometryBySize,

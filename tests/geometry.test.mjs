@@ -82,12 +82,17 @@ import {
 import { getSTRProfile } from "../src/lib/geometry/strProfile.js";
 import {
   addGeometryImportDraftSize,
+  copyGeometryImportDraftSize,
   CORE_GEOMETRY_FIELD_KEYS,
+  createManualGeometryImportDraft,
   GEOMETRY_IMPORT_FIELDS,
   GEOMETRY_IMPORT_STATUSES,
+  getGeometryDraftSourceCounts,
   getGeometryImportPreviewIssues,
   importGeometryToSizeData,
   isGeometryImportPreviewSafe,
+  MANUAL_GEOMETRY_SIZE_PLACEHOLDER,
+  renameGeometryImportDraftSize,
   resolveGeometryImportPreview,
   STRUCTURAL_GEOMETRY_FIELD_KEYS,
   toggleGeometryImportSize,
@@ -795,7 +800,7 @@ test("zero-bike Welcome Gate overlays the real demo workspace", () => {
   assert.match(appSource, /const showWelcomeGate = bikes\.length === 0 && geometryImportStatus === "ready"/);
   assert.match(appSource, /const \[geometryImportStatus, setGeometryImportStatus\] = useState\("ready"\)/);
   assert.match(appSource, /<main[\s\S]*className=\{`workspace[\s\S]*inert=\{showWelcomeGate \? true : undefined\}/);
-  assert.match(appSource, /\{showWelcomeGate && <WelcomeGate onUsePreset=\{useWelcomePreset\} onSelectImage=\{selectWelcomeImage\} \/>\}/);
+  assert.match(appSource, /\{showWelcomeGate && <WelcomeGate onUsePreset=\{useWelcomePreset\} onSelectImage=\{selectWelcomeImage\} onManualEntry=\{startManualGeometryImport\} \/>\}/);
   assert.match(appSource, /const \[demoBike\] = useState\(\(\) => createComparisonBike\("demo-preview", initialSetup\)\)/);
   assert.match(appSource, /const useWelcomePreset = \(\) => \{[\s\S]*setBikes\(\[bike\]\);[\s\S]*setActiveBikeIndex\(0\)/);
   assert.match(appSource, /const selectWelcomeImage = \(file\) => \{[\s\S]*const operation = \{ type: "add", targetIndex: null \};[\s\S]*selectGeometryImage\(file, operation\)/);
@@ -804,14 +809,78 @@ test("zero-bike Welcome Gate overlays the real demo workspace", () => {
   assert.match(welcomeGateSource, /先选一辆车，开始你的几何实验/);
   assert.match(welcomeGateSource, /使用预设车型体验[\s\S]*TREK Domane/);
   assert.match(welcomeGateSource, /上传官网几何图[\s\S]*官方车架几何图/);
+  assert.match(welcomeGateSource, /手动录入几何[\s\S]*根据官网数据手动填写/);
   assert.match(welcomeGateSource, /\.png,\.jpg,\.jpeg,image\/png,image\/jpeg/);
   assert.match(welcomeGateSource, /const \[file\] = Array\.from\(event\.target\.files \?\? \[\]\);[\s\S]*if \(file\) onSelectImage\(file\)/);
   assert.match(stylesSource, /\.welcome-gate\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*background:\s*rgba\(0,0,0,\.76\);[^}]*backdrop-filter:\s*blur\(3px\)/s);
-  assert.match(stylesSource, /\.welcome-gate__choices\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s);
+  assert.match(stylesSource, /\.welcome-gate__choices\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
   assert.match(stylesSource, /\.welcome-choice--primary\s*\{[^}]*background:\s*var\(--selected-bg\)/s);
   assert.match(stylesSource, /\.welcome-choice--secondary\s*\{[^}]*background:\s*rgba\(20,22,26,\.90\)/s);
   assert.doesNotMatch(stylesSource.match(/\.welcome-gate__content\s*\{[^}]*\}/s)?.[0] ?? "", /background|border|box-shadow/);
   assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
+});
+
+test("manual Geometry entry bypasses image parsing and shares the import draft pipeline", () => {
+  const manualEntrySource = appSource.match(/const startManualGeometryImport = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+  assert.match(manualEntrySource, /createManualGeometryImportDraft\(\)/);
+  assert.match(manualEntrySource, /setGeometryImportStatus\("review"\)/);
+  assert.doesNotMatch(manualEntrySource, /analyzeGeometryImage|selectGeometryImage|rawRows/);
+
+  const emptyDraft = createManualGeometryImportDraft();
+  assert.equal(emptyDraft.entryMode, "manual");
+  assert.equal(emptyDraft.geometryValueSource, "manual");
+  assert.equal(emptyDraft.selectedSize, MANUAL_GEOMETRY_SIZE_PLACEHOLDER);
+  assert.deepEqual(emptyDraft.rawRows, []);
+  assert.deepEqual(emptyDraft.parserWarnings, []);
+  assert.equal(validateGeometryImportDraft(emptyDraft).firstErrorKey, "brand");
+
+  let draft = renameGeometryImportDraftSize(emptyDraft, "54");
+  draft = { ...draft, brand: "Specialized", model: "Roubaix" };
+  for (const [key, value] of Object.entries({
+    stack: 585,
+    reach: 384,
+    seatTubeAngle: 73.5,
+    headTubeAngle: 72.5,
+  })) {
+    draft = updateGeometryImportDraftField(draft, "54", key, value);
+  }
+  assert.equal(validateGeometryImportDraft(draft).isValid, true);
+  assert.deepEqual(getGeometryDraftSourceCounts(draft.sizes[54], { directSource: "manual" }), {
+    official: 0,
+    manual: 4,
+    derived: 0,
+    estimated: 7,
+  });
+
+  const copied = copyGeometryImportDraftSize(draft, "56");
+  assert.deepEqual(copied.selectedImportSizes, ["54", "56"]);
+  assert.equal(copied.selectedSize, "56");
+  assert.notStrictEqual(copied.sizes[54], copied.sizes[56]);
+  const changedCopy = updateGeometryImportDraftField(copied, "56", "stack", 603);
+  assert.equal(changedCopy.sizes[54].stack, 585);
+  assert.equal(changedCopy.sizes[56].stack, 603);
+
+  const originalBike = createComparisonBike("manual", createDefaultBikeSetup());
+  const manualBike = createBikeFromGeometryImport(originalBike, draft);
+  assert.deepEqual(manualBike.sizes, ["54"]);
+  assert.equal(manualBike.sourceLabel, "手动几何数据");
+  assert.equal(manualBike.importSource.entryMode, "manual");
+  assert.equal(manualBike.importSource.geometryValueSource, "manual");
+  assert.equal(manualBike.geometrySources.stack, "manual");
+  assert.equal(manualBike.geometrySources.wheelbase, "estimated");
+  assert.equal(manualBike.geometryCompleteness, "approximate");
+  assert.deepEqual(manualBike.sizeData.geometrySourceCounts, {
+    official: 0,
+    manual: 4,
+    derived: 0,
+    estimated: 7,
+  });
+
+  assert.match(geometryImportFlowSource, /<h3>基础信息<\/h3>[\s\S]*不会调用图片识别/);
+  assert.match(geometryImportFlowSource, /<h3>核心几何<\/h3>[\s\S]*showRequired/);
+  assert.match(geometryImportFlowSource, /<h3>补充几何<\/h3>[\s\S]*部分参数将使用模板估算/);
+  assert.match(geometryImportFlowSource, /复制当前尺码参数/);
+  assert.match(framePanelSource, /isManualImport \? "手动录入 · 本地 Draft · 不调用 AI"/);
 });
 
 test("geometry import auto-analyzes one editable multi-size draft through the existing Renderer path", () => {
@@ -892,14 +961,16 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.match(framePanelSource, /options=\{bike\.sizes\}/);
   assert.match(framePanelSource, /className="frame-model-section"[\s\S]*model-action-slot/);
   assert.match(framePanelSource, /tabIndex=\{bike\.source === "upload" \? 0 : -1\}/);
-  assert.match(framePanelSource, /className="size-selector-area"[\s\S]*<SegmentedControl options=\{bike\.sizes\}/);
+  assert.match(framePanelSource, /className="size-selector-area"[\s\S]*<SegmentedControl className="size-selector-grid" options=\{bike\.sizes\}/);
   assert.doesNotMatch(appSource, /<FrameGeometryPanel[^>]*key=\{/);
   assert.match(stylesSource, /\.frame-panel \.section-title\s*\{[^}]*min-height:\s*28px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
   assert.match(stylesSource, /\.model-action-slot\s*\{[^}]*width:\s*96px;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none/);
   assert.match(stylesSource, /\.model-card\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 64px/);
   assert.match(stylesSource, /\.model-card strong\s*\{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap/);
-  assert.match(stylesSource, /\.size-selector-area \.segmented\s*\{[^}]*grid-template-columns:\s*repeat\(7, 40px\)/);
-  assert.match(stylesSource, /\.size-selector-area \.segmented button\s*\{[^}]*width:\s*40px;[^}]*height:\s*40px;[^}]*font-variant-numeric:\s*tabular-nums/);
+  assert.match(stylesSource, /\.size-selector-grid\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\);[^}]*gap:\s*8px/);
+  assert.match(stylesSource, /\.size-selector-grid button\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*height:\s*40px;[^}]*font-variant-numeric:\s*tabular-nums;[^}]*white-space:\s*nowrap/);
+  assert.match(geometryImportFlowSource, /geometry-import__candidate-sizes size-selector-grid/);
+  assert.match(geometryImportFlowSource, /geometry-import__selected-sizes size-selector-grid/);
   assert.match(stylesSource, /\.geometry-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(stylesSource, /\.geometry-detail-list > div\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 100px/);
   assert.match(stylesSource, /\.geometry-detail-list dd\s*\{[^}]*width:\s*100px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 24px/);

@@ -8,6 +8,8 @@ export const GEOMETRY_IMPORT_STATUSES = Object.freeze([
   "error",
 ]);
 
+export const MANUAL_GEOMETRY_SIZE_PLACEHOLDER = "__manual_size__";
+
 export const GEOMETRY_IMPORT_FIELDS = Object.freeze([
   { key: "stack", label: "Stack", reviewLabel: "堆高", required: true, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.stack },
   { key: "reach", label: "Reach", reviewLabel: "前伸量", required: true, ...GEOMETRY_PARSER_PLAUSIBILITY_RANGES.reach },
@@ -36,6 +38,32 @@ const fieldsByKey = Object.freeze(Object.fromEntries(
 
 const toSize = (value) => String(value ?? "").trim();
 const cloneGeometry = (geometry) => ({ ...geometry });
+const createEmptyGeometry = () => Object.fromEntries(
+  GEOMETRY_IMPORT_FIELDS.map(({ key }) => [key, null]),
+);
+
+export function createManualGeometryImportDraft() {
+  const geometry = createEmptyGeometry();
+  return {
+    entryMode: "manual",
+    geometryValueSource: "manual",
+    brand: "",
+    model: "",
+    category: "endurance",
+    candidateSizes: { [MANUAL_GEOMETRY_SIZE_PLACEHOLDER]: { ...geometry } },
+    sizes: { [MANUAL_GEOMETRY_SIZE_PLACEHOLDER]: { ...geometry } },
+    selectedImportSizes: [MANUAL_GEOMETRY_SIZE_PLACEHOLDER],
+    selectedSize: MANUAL_GEOMETRY_SIZE_PLACEHOLDER,
+    detectedSizes: [],
+    detectedSizeCount: 0,
+    rawRows: [],
+    allParserWarnings: [],
+    parserWarnings: [],
+    parserConfirmationCount: 0,
+    unrecognizedFields: [],
+    parserMeta: null,
+  };
+}
 
 export function getSelectedImportSizes(draft) {
   const candidateSizes = draft?.candidateSizes ?? draft?.sizes ?? {};
@@ -114,7 +142,7 @@ function isOfficialGeometryValue(field, value) {
 
 function deriveWheelbase(resolved, sources) {
   const inputKeys = ["reach", "chainstay", "bbDrop", "forkOffset"];
-  if (!inputKeys.every((key) => sources[key] === "official")) return null;
+  if (!inputKeys.every((key) => ["official", "manual"].includes(sources[key]))) return null;
   const rearProjection = Math.sqrt(Math.max(0, resolved.chainstay ** 2 - resolved.bbDrop ** 2));
   const templateRearProjection = Math.sqrt(Math.max(
     0,
@@ -127,7 +155,7 @@ function deriveWheelbase(resolved, sources) {
     + (resolved.forkOffset - TEMPLATE_GEOMETRY_DEFAULTS.forkOffset);
 }
 
-export function resolveGeometryImportPreview(geometry) {
+export function resolveGeometryImportPreview(geometry, { directSource = "official" } = {}) {
   const issues = getGeometryImportPreviewIssues(geometry);
   if (issues.length) {
     return {
@@ -145,7 +173,7 @@ export function resolveGeometryImportPreview(geometry) {
     const value = geometry?.[field.key];
     if (isOfficialGeometryValue(field, value)) {
       resolved[field.key] = Number(value);
-      geometrySources[field.key] = "official";
+      geometrySources[field.key] = directSource;
     } else {
       resolved[field.key] = TEMPLATE_GEOMETRY_DEFAULTS[field.key];
       geometrySources[field.key] = "estimated";
@@ -171,6 +199,22 @@ export function resolveGeometryImportPreview(geometry) {
     geometry: resolved,
     geometrySources,
     geometryCompleteness,
+  };
+}
+
+export function getGeometryDraftSourceCounts(geometry, { directSource = "official" } = {}) {
+  const resolved = resolveGeometryImportPreview(geometry, { directSource });
+  const sources = resolved.isValid
+    ? Object.values(resolved.geometrySources)
+    : GEOMETRY_IMPORT_FIELDS.flatMap((field) => {
+      if (isOfficialGeometryValue(field, geometry?.[field.key])) return [directSource];
+      return field.required ? [] : ["estimated"];
+    });
+  return {
+    official: sources.filter((source) => source === "official").length,
+    manual: sources.filter((source) => source === "manual").length,
+    derived: sources.filter((source) => source === "derived").length,
+    estimated: sources.filter((source) => source === "estimated").length,
   };
 }
 
@@ -213,6 +257,9 @@ export function validateGeometryImportDraft(draft) {
 
   const sizes = getSelectedImportSizes(draft);
   if (sizes.length === 0) errors.sizes = "未识别到可用尺码";
+  if (draft?.entryMode === "manual" && sizes.some((size) => size === MANUAL_GEOMETRY_SIZE_PLACEHOLDER)) {
+    errors.sizes = "请输入尺码名称";
+  }
 
   for (const size of sizes) {
     const geometry = draft.sizes[size] ?? {};
@@ -238,7 +285,7 @@ export function addGeometryImportDraftSize(draft, rawSize) {
   if (alreadySelected && draft.candidateSizes?.[size]) return draft;
   const candidateSizes = { ...(draft.candidateSizes ?? draft.sizes ?? {}) };
   if (!candidateSizes[size]) {
-    candidateSizes[size] = Object.fromEntries(GEOMETRY_IMPORT_FIELDS.map(({ key }) => [key, null]));
+    candidateSizes[size] = createEmptyGeometry();
   }
   const selectedImportSizes = getSelectedImportSizes({ ...draft, candidateSizes });
   if (selectedImportSizes.includes(size)) return { ...draft, candidateSizes };
@@ -247,6 +294,43 @@ export function addGeometryImportDraftSize(draft, rawSize) {
     candidateSizes,
     selectedSize: size,
   }, [...selectedImportSizes, size]);
+}
+
+export function renameGeometryImportDraftSize(draft, rawSize) {
+  if (!draft) return draft;
+  const currentSize = toSize(draft.selectedSize);
+  const nextSize = toSize(rawSize) || MANUAL_GEOMETRY_SIZE_PLACEHOLDER;
+  if (!currentSize || currentSize === nextSize) return draft;
+  const candidateSizes = { ...(draft.candidateSizes ?? draft.sizes ?? {}) };
+  if (candidateSizes[nextSize]) return draft;
+  const currentGeometry = draft.sizes?.[currentSize] ?? candidateSizes[currentSize] ?? createEmptyGeometry();
+  delete candidateSizes[currentSize];
+  candidateSizes[nextSize] = { ...currentGeometry };
+  const selectedImportSizes = getSelectedImportSizes(draft).map((size) => (
+    size === currentSize ? nextSize : size
+  ));
+  return applyImportSizeSelection({
+    ...draft,
+    candidateSizes,
+    selectedSize: nextSize,
+  }, selectedImportSizes);
+}
+
+export function copyGeometryImportDraftSize(draft, rawSize) {
+  const size = toSize(rawSize);
+  if (!draft || !size || draft.candidateSizes?.[size]) return draft;
+  const sourceGeometry = draft.sizes?.[draft.selectedSize];
+  if (!sourceGeometry) return draft;
+  const candidateSizes = {
+    ...(draft.candidateSizes ?? draft.sizes ?? {}),
+    [draft.selectedSize]: { ...sourceGeometry },
+    [size]: { ...sourceGeometry },
+  };
+  return applyImportSizeSelection({
+    ...draft,
+    candidateSizes,
+    selectedSize: size,
+  }, [...getSelectedImportSizes(draft), size]);
 }
 
 export function toggleGeometryImportSize(draft, rawSize) {
@@ -260,8 +344,8 @@ export function toggleGeometryImportSize(draft, rawSize) {
   return applyImportSizeSelection(draft, selectedImportSizes.filter((candidate) => candidate !== size));
 }
 
-export function importGeometryToSizeData(size, geometry) {
-  const resolved = resolveGeometryImportPreview(geometry);
+export function importGeometryToSizeData(size, geometry, directSource = "official") {
+  const resolved = resolveGeometryImportPreview(geometry, { directSource });
   const values = resolved.geometry ?? geometry;
   return {
     size: String(size),
@@ -281,6 +365,7 @@ export function importGeometryToSizeData(size, geometry) {
     stackMm: values.stack,
     geometrySources: resolved.geometrySources,
     geometryCompleteness: resolved.geometryCompleteness,
+    geometrySourceCounts: getGeometryDraftSourceCounts(geometry, { directSource }),
   };
 }
 
@@ -315,6 +400,8 @@ export function bikeToGeometryImportDraft(bike) {
   const parserWarnings = scopeGeometryImportWarnings(allParserWarnings, selectedImportSizes);
 
   return {
+    entryMode: bike.importSource?.entryMode ?? "ai",
+    geometryValueSource: bike.importSource?.geometryValueSource ?? "official",
     brand: bike.brand,
     model: bike.model,
     category: "endurance",

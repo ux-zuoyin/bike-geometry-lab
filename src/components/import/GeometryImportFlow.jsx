@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle, ImageSquare, Info, Plus, SpinnerGap, UploadSimple, WarningCircle } from "@phosphor-icons/react";
-import { GEOMETRY_IMPORT_FIELDS } from "../../state/geometryImportState.js";
+import { GEOMETRY_IMPORT_FIELDS, getGeometryDraftSourceCounts, MANUAL_GEOMETRY_SIZE_PLACEHOLDER } from "../../state/geometryImportState.js";
 
 const ACCEPTED_IMAGE_TYPES = ".png,.jpg,.jpeg,image/png,image/jpeg";
 
@@ -53,7 +53,31 @@ function AnalyzingState({ image, onSelectImage, onCancel }) {
   );
 }
 
-function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+function GeometryFieldRows({ fields, draft, errors, parserWarnings, onGeometryFieldChange, showRequired = false }) {
+  const selectedGeometry = draft.sizes[draft.selectedSize] ?? {};
+  return (
+    <div className="geometry-import__field-list">
+      {fields.map((field) => {
+        const errorKey = `sizes.${draft.selectedSize}.${field.key}`;
+        const parserRangeWarning = parserWarnings.find((warning) => (
+          warning.code === "GEOMETRY_VALUE_OUT_OF_RANGE"
+          && warning.size === draft.selectedSize
+          && warning.field === field.key
+        ));
+        const error = errors[errorKey] || (parserRangeWarning
+          ? "识别结果可能发生串列，请核对原图。"
+          : null);
+        const value = selectedGeometry[field.key];
+        const errorId = `geometry-import-${draft.selectedSize}-${field.key}-error`;
+        const inputId = `geometry-import-${draft.selectedSize}-${field.key}`;
+        const tooltipId = `${inputId}-tooltip`;
+        return <div key={field.key} className={`geometry-import__field-row${error ? " has-error" : ""}`}><span className="geometry-import__field-name"><label htmlFor={inputId}><strong>{field.label}{showRequired && field.required && <b aria-hidden="true"> *</b>}</strong><span className="geometry-import__field-translation">{field.reviewLabel}</span>{!field.required && value == null && <small>未识别</small>}</label>{field.tooltip && <span className="geometry-import__field-tooltip"><button type="button" aria-label={`查看 ${field.label} 术语说明`} aria-describedby={tooltipId}><Info size={14} weight="regular" aria-hidden="true" /></button><span id={tooltipId} role="tooltip">{field.tooltip}</span></span>}</span><span className="geometry-import__number-input"><input id={inputId} data-validation-key={errorKey} type="number" step={field.unit === "°" ? "0.1" : "1"} value={value ?? ""} placeholder="未识别" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => onGeometryFieldChange(field.key, event.target.value)} /><small>{field.unit}</small></span>{error && <em id={errorId} role="alert">{error}</em>}</div>;
+      })}
+    </div>
+  );
+}
+
+function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
   const [newSize, setNewSize] = useState("");
   const [submitFeedback, setSubmitFeedback] = useState(null);
   const [errorNavigation, setErrorNavigation] = useState(null);
@@ -65,6 +89,11 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
   const parserWarnings = Array.isArray(draft.parserWarnings) ? draft.parserWarnings : [];
   const detectedSizeCount = draft.detectedSizeCount ?? sizes.length;
   const confirmationCount = draft.parserConfirmationCount || parserWarnings.length;
+  const isManual = mode === "manual" || draft.entryMode === "manual";
+  const manualSizeName = draft.selectedSize === MANUAL_GEOMETRY_SIZE_PLACEHOLDER ? "" : draft.selectedSize;
+  const manualSourceCounts = isManual
+    ? getGeometryDraftSourceCounts(selectedGeometry, { directSource: "manual" })
+    : null;
   useEffect(() => {
     if (!errorNavigation?.key) return;
     const target = formRef.current?.querySelector(`[data-validation-key="${errorNavigation.key}"]`);
@@ -93,8 +122,14 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
   }, [submitFeedback]);
   const addSize = () => {
     const size = newSize.trim();
-    if (!size || draft.sizes[size]) return;
+    if (!size || draft.candidateSizes?.[size]) return;
     onAddSize(size);
+    setNewSize("");
+  };
+  const copySize = () => {
+    const size = newSize.trim();
+    if (!size || draft.candidateSizes?.[size]) return;
+    onCopySize(size);
     setNewSize("");
   };
   const submit = () => {
@@ -105,6 +140,56 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
       setErrorNavigation({ key: validation?.firstErrorKey, attempt: submitAttemptRef.current });
     }
   };
+  if (isManual) {
+    const coreFields = GEOMETRY_IMPORT_FIELDS.filter(({ required }) => required);
+    const supplementalFieldOrder = [
+      "seatTubeLength",
+      "headTubeLength",
+      "effectiveTopTube",
+      "chainstay",
+      "wheelbase",
+      "bbDrop",
+      "forkOffset",
+    ];
+    const supplementalFields = supplementalFieldOrder.map((key) => (
+      GEOMETRY_IMPORT_FIELDS.find((field) => field.key === key)
+    ));
+    return (
+      <form ref={formRef} className="geometry-import geometry-import--review geometry-import--manual" noValidate onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <section className="geometry-import__block">
+          <div className="geometry-import__state-heading"><div><h3>基础信息</h3><span>手动录入官网数据，不会调用图片识别</span></div></div>
+          <div className="geometry-import__identity-fields">
+            <label><span>品牌名称</span><input data-validation-key="brand" type="text" value={draft.brand} placeholder="例如 Specialized" aria-invalid={Boolean(errors.brand)} aria-describedby={errors.brand ? "geometry-import-brand-error" : undefined} onChange={(event) => onDraftMetaChange("brand", event.target.value)} />{errors.brand && <small id="geometry-import-brand-error" role="alert">{errors.brand}</small>}</label>
+            <label><span>车型名称 <small>选填</small></span><input type="text" value={draft.model} placeholder="未命名车型" onChange={(event) => onDraftMetaChange("model", event.target.value)} /></label>
+            <div className="geometry-import__category"><span>车架类型</span><strong>耐力型</strong><small>本阶段仅支持 Endurance</small></div>
+            <label><span>尺码名称</span><input data-validation-key="sizes" type="text" value={manualSizeName} placeholder="例如 54、430、S" aria-invalid={Boolean(errors.sizes)} aria-describedby={errors.sizes ? "geometry-import-sizes-error" : undefined} onChange={(event) => onManualSizeChange(event.target.value)} />{errors.sizes && <small id="geometry-import-sizes-error" role="alert">{errors.sizes}</small>}</label>
+          </div>
+          {sizes.length > 1 && <div className="geometry-import__selected-sizes size-selector-grid" role="group" aria-label="当前录入尺码">{sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} title={size} onClick={() => onSelectSize(size)}>{size === MANUAL_GEOMETRY_SIZE_PLACEHOLDER ? "待填写" : size}</button>)}</div>}
+          <div className="geometry-import__manual-size-actions">
+            <input type="text" value={newSize} aria-label="新尺码名称" placeholder="新增尺码名称" onChange={(event) => setNewSize(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSize(); } }} />
+            <button type="button" onClick={addSize}><Plus size={16} />添加尺码</button>
+            <button type="button" onClick={copySize}>复制当前尺码参数</button>
+          </div>
+        </section>
+        <section className="geometry-import__block">
+          <div className="geometry-import__review-title"><div><h3>核心几何</h3><span>完成以下参数后即可生成车架</span></div><span>{manualSizeName || "待填写尺码"}</span></div>
+          <GeometryFieldRows fields={coreFields} draft={draft} errors={errors} parserWarnings={[]} onGeometryFieldChange={onGeometryFieldChange} showRequired />
+        </section>
+        <section className="geometry-import__block">
+          <div className="geometry-import__review-title"><div><h3>补充几何</h3><span>填写更多官网参数可以提高车架预览准确度，没有的数据可以留空。</span></div></div>
+          <GeometryFieldRows fields={supplementalFields} draft={draft} errors={errors} parserWarnings={[]} onGeometryFieldChange={onGeometryFieldChange} />
+          <p className={`geometry-import__completeness${manualSourceCounts.estimated ? " is-approximate" : ""}`}>{manualSourceCounts.manual} 项手动数据{manualSourceCounts.derived ? ` · ${manualSourceCounts.derived} 项几何推导` : ""}{manualSourceCounts.estimated ? ` · ${manualSourceCounts.estimated} 项模板估算。部分参数将使用模板估算` : ""}</p>
+        </section>
+        <div className="geometry-import__review-actions">
+          {submitFeedback && <p className="geometry-import__submit-feedback" role="status" aria-live="polite">{submitFeedback.message}</p>}
+          <div className="geometry-import__review-buttons">
+            {onCancel && <button type="button" className="geometry-import__cancel" onClick={onCancel}>取消</button>}
+            <button type="submit" className="geometry-import__primary">确认生成车架</button>
+          </div>
+        </div>
+      </form>
+    );
+  }
   return (
     <form ref={formRef} className="geometry-import geometry-import--review" noValidate onSubmit={(event) => { event.preventDefault(); submit(); }}>
       <section className="geometry-import__block">
@@ -128,33 +213,16 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
       </section>
       <section className="geometry-import__block">
         <div className="geometry-import__review-title"><div><h3>你想导入哪些尺码？</h3><span>默认选择一个尺码；可按需添加相邻尺码</span></div><span>已选 {sizes.length} 个</span></div>
-        <div className="geometry-import__candidate-sizes" role="group" aria-label="可导入尺码">
+        <div className="geometry-import__candidate-sizes size-selector-grid" role="group" aria-label="可导入尺码">
           {candidateSizes.map((size) => <button type="button" key={size} className={sizes.includes(size) ? "is-selected" : ""} aria-pressed={sizes.includes(size)} title={size} onClick={() => onToggleImportSize(size)}>{size}</button>)}
         </div>
-        {sizes.length > 1 && <div className="geometry-import__selected-sizes" role="group" aria-label="当前校对尺码">{sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} title={size} onClick={() => onSelectSize(size)}>{size}</button>)}</div>}
+        {sizes.length > 1 && <div className="geometry-import__selected-sizes size-selector-grid" role="group" aria-label="当前校对尺码">{sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} title={size} onClick={() => onSelectSize(size)}>{size}</button>)}</div>}
         <div className="geometry-import__add-size"><input data-validation-key="sizes" type="text" inputMode="decimal" value={newSize} aria-label="补充尺码" placeholder="输入尺码，例如 58" aria-invalid={Boolean(errors.sizes)} aria-describedby={errors.sizes ? "geometry-import-sizes-error" : undefined} onChange={(event) => setNewSize(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSize(); } }} /><button type="button" onClick={addSize}><Plus size={16} />补充尺码</button></div>
         {errors.sizes && <p id="geometry-import-sizes-error" className="geometry-import__inline-error" role="alert">{errors.sizes}</p>}
       </section>
       <section className="geometry-import__block">
         <div className="geometry-import__review-title"><h3>关键几何参数</h3><span>{draft.selectedSize} 码</span></div>
-        <div className="geometry-import__field-list">
-          {GEOMETRY_IMPORT_FIELDS.map((field) => {
-            const errorKey = `sizes.${draft.selectedSize}.${field.key}`;
-            const parserRangeWarning = parserWarnings.find((warning) => (
-              warning.code === "GEOMETRY_VALUE_OUT_OF_RANGE"
-              && warning.size === draft.selectedSize
-              && warning.field === field.key
-            ));
-            const error = errors[errorKey] || (parserRangeWarning
-              ? "识别结果可能发生串列，请核对原图。"
-              : null);
-            const value = selectedGeometry[field.key];
-            const errorId = `geometry-import-${draft.selectedSize}-${field.key}-error`;
-            const inputId = `geometry-import-${draft.selectedSize}-${field.key}`;
-            const tooltipId = `${inputId}-tooltip`;
-            return <div key={field.key} className={`geometry-import__field-row${error ? " has-error" : ""}`}><span className="geometry-import__field-name"><label htmlFor={inputId}><strong>{field.label}</strong><span className="geometry-import__field-translation">{field.reviewLabel}</span>{!field.required && value == null && <small>未识别</small>}</label>{field.tooltip && <span className="geometry-import__field-tooltip"><button type="button" aria-label={`查看 ${field.label} 术语说明`} aria-describedby={tooltipId}><Info size={14} weight="regular" aria-hidden="true" /></button><span id={tooltipId} role="tooltip">{field.tooltip}</span></span>}</span><span className="geometry-import__number-input"><input id={inputId} data-validation-key={errorKey} type="number" step={field.unit === "°" ? "0.1" : "1"} value={value ?? ""} placeholder="未识别" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => onGeometryFieldChange(field.key, event.target.value)} /><small>{field.unit}</small></span>{error && <em id={errorId} role="alert">{error}</em>}</div>;
-          })}
-        </div>
+        <GeometryFieldRows fields={GEOMETRY_IMPORT_FIELDS} draft={draft} errors={errors} parserWarnings={parserWarnings} onGeometryFieldChange={onGeometryFieldChange} />
       </section>
       <div className="geometry-import__review-actions">
         {submitFeedback && <p className="geometry-import__submit-feedback" role="status" aria-live="polite">{submitFeedback.message}</p>}
@@ -172,8 +240,8 @@ function ErrorState({ message, image, onSelectImage, onReanalyze, onCancel }) {
   return <div className="geometry-import geometry-import--error"><section className="geometry-import__block"><WarningCircle size={30} weight="regular" aria-hidden="true" /><h3>AI 暂时无法提取这张图片</h3><p>{message}</p><div className="geometry-import__error-actions">{image && onReanalyze && <button type="button" className="geometry-import__secondary" onClick={onReanalyze}>重新识别</button>}<GeometryImagePicker compact label="重新上传图片" onSelectImage={onSelectImage} />{onCancel && <button type="button" className="geometry-import__cancel" onClick={onCancel}>取消</button>}</div></section></div>;
 }
 
-export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
   if (status === "analyzing" && image) return <AnalyzingState image={image} onSelectImage={onSelectImage} onCancel={onCancel} />;
-  if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onToggleImportSize={onToggleImportSize} onAddSize={onAddSize} onGeometryFieldChange={onGeometryFieldChange} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
+  if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onToggleImportSize={onToggleImportSize} onAddSize={onAddSize} onCopySize={onCopySize} onManualSizeChange={onManualSizeChange} onGeometryFieldChange={onGeometryFieldChange} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
   return <ErrorState message={errorMessage} image={image} onSelectImage={onSelectImage} onReanalyze={onReanalyze} onCancel={onCancel} />;
 }
