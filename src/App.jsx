@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { updateWheelSelection, updateWheelSelectionLink } from "./config/bikeComponents.js";
 import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersistence.js";
 import { createBikeFromGeometryImport, createComparisonBike, getPersistableBikeSetup, updateBikeSize } from "./state/dualBikeState.js";
-import { addGeometryImportDraftSize, bikeToGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
+import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
 import { analyzeGeometryImage } from "./services/geometryImageAnalyzer.js";
 import { FrameGeometryPanel } from "./components/panels/FrameGeometryPanel.jsx";
@@ -170,6 +170,16 @@ export function App() {
     setGeometryImportDraft((current) => addGeometryImportDraftSize(current, size));
     setGeometryImportErrors((current) => ({ ...current, sizes: undefined }));
   };
+  const copyGeometryImportSize = (size) => {
+    setGeometryImportDraft((current) => copyGeometryImportDraftSize(current, size));
+    setGeometryImportErrors((current) => ({ ...current, sizes: undefined }));
+  };
+  const renameManualGeometryImportSize = (size) => {
+    setGeometryImportDraft((current) => renameGeometryImportDraftSize(current, size));
+    setGeometryImportErrors((current) => Object.fromEntries(
+      Object.entries(current).filter(([key]) => key !== "sizes" && !key.startsWith("sizes.")),
+    ));
+  };
   const updateGeometryImportField = (key, value) => {
     if (!geometryImportDraft) return;
     const size = geometryImportDraft.selectedSize;
@@ -219,7 +229,7 @@ export function App() {
       return validation;
     }
     const operation = importOperation ?? { type: "add", targetIndex: null };
-    if (operation.type === "add") {
+    if (operation.type === "add" || operation.type === "manual") {
       if (bikes.length >= MAX_BIKES) return;
       const base = createComparisonBike(createBikeId(), getPersistableBikeSetup(selectedBike ?? demoBike));
       const importedBike = createBikeFromGeometryImport(base, geometryImportDraft, geometryImportImage);
@@ -247,6 +257,14 @@ export function App() {
     const operation = { type: "add", targetIndex: null };
     setImportOperation(operation);
     selectGeometryImage(file, operation);
+  };
+  const startManualGeometryImport = () => {
+    setImportOperation({ type: "manual", targetIndex: null });
+    setGeometryImportImage(null);
+    setGeometryImportDraft(createManualGeometryImportDraft());
+    setGeometryImportErrors({});
+    setGeometryImportErrorMessage("");
+    setGeometryImportStatus("review");
   };
   const openBikeManagement = (index) => {
     setManagementIndex(index);
@@ -303,6 +321,8 @@ export function App() {
             onSelectSize: selectGeometryImportSize,
             onToggleImportSize: toggleGeometryImportCandidateSize,
             onAddSize: addGeometryImportSize,
+            onCopySize: copyGeometryImportSize,
+            onManualSizeChange: renameManualGeometryImportSize,
             onGeometryFieldChange: updateGeometryImportField,
             onConfirm: confirmGeometryImport,
             onReanalyze: () => geometryImportImage && analyzeGeometryImageRecord(geometryImportImage, importOperation),
@@ -332,7 +352,7 @@ export function App() {
         </div>
         <BikeSetupPanel fitSetup={workspaceBike.fitSetup} updateFitSetup={updateFitSetup} componentSetup={workspaceBike.componentSetup} updateComponentSetup={updateComponentSetup} isStageFullscreen={isStageFullscreen || isGeometryImportActive} />
       </main>
-      {showWelcomeGate && <WelcomeGate onUsePreset={useWelcomePreset} onSelectImage={selectWelcomeImage} />}
+      {showWelcomeGate && <WelcomeGate onUsePreset={useWelcomePreset} onSelectImage={selectWelcomeImage} onManualEntry={startManualGeometryImport} />}
       <BikeManagementModal
         bike={managementIndex == null ? null : bikes[managementIndex]}
         stage={managementStage}

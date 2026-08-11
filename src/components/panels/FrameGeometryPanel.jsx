@@ -23,6 +23,7 @@ const displayGeometryValue = (value) => (value == null || value === "" ? "未识
 export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, geometryImport, isStageFullscreen = false }) {
   const sizeData = bike.sizeData;
   const isImportReady = geometryImport.status === "ready";
+  const isManualImport = geometryImport.mode === "manual" || geometryImport.draft?.entryMode === "manual";
   const [geometryLanguage, setGeometryLanguage] = useState(() => {
     try {
       return window.localStorage.getItem(GEOMETRY_LANGUAGE_STORAGE_KEY) === "en" ? "en" : "zh";
@@ -43,7 +44,9 @@ export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, g
     <aside className="side-panel frame-panel" aria-label="车架与几何" aria-hidden={isStageFullscreen} inert={isStageFullscreen ? true : undefined}>
       <header className="panel-heading">
         <h2>车架几何</h2>
-        <p>{isImportReady ? `选择车型与尺码。当前使用${bike.sourceLabel}。` : "请核对 AI 初步提取的车架几何数据。"}</p>
+        <p>{isImportReady
+          ? `选择车型与尺码。当前使用${bike.sourceLabel}。`
+          : (isManualImport ? "填写官网几何数据，缺失的补充参数可留空。" : "请核对 AI 初步提取的车架几何数据。")}</p>
       </header>
 
       <div className="side-panel__scroll">
@@ -78,7 +81,7 @@ export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, g
 
         <PanelSection title="尺码" hint={`已选择 · ${bike.size}`} className="frame-size-section">
           <div className="size-selector-area">
-            <SegmentedControl options={bike.sizes} value={bike.size} onChange={setFrameSize} />
+            <SegmentedControl className="size-selector-grid" options={bike.sizes} value={bike.size} onChange={setFrameSize} />
           </div>
           <p className="section-note">切换尺码不会改变右侧骑行设定和配件选择。</p>
         </PanelSection>
@@ -159,7 +162,9 @@ export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, g
         )}
       </div>
 
-      <footer><span className="status-dot" />{isImportReady ? `${bike.brand} ${bike.model} · ${bike.sourceLabel} · mm / °` : "本地图片 · AI 初步提取 · 不上传"}</footer>
+      <footer><span className="status-dot" />{isImportReady
+        ? `${bike.brand} ${bike.model} · ${bike.sourceLabel} · mm / °`
+        : (isManualImport ? "手动录入 · 本地 Draft · 不调用 AI" : "本地图片 · AI 初步提取 · 不上传")}</footer>
     </aside>
   );
 }
