@@ -49,9 +49,12 @@ export function LandingPage({ onEnterLab, transitionState = null, onTransitionCo
             <p className="landing-page__description">
               从车架几何、骑行姿态到配置选择，理解一辆车为何适合你。
             </p>
-            <button className="landing-page__cta" type="button" onClick={onEnterLab}>
-              进入几何实验室 <span aria-hidden="true">→</span>
-            </button>
+            <div className="landing-page__cta-wrap">
+              <span className="landing-page__cta-badge">免费体验</span>
+              <button className="landing-page__cta" type="button" onClick={onEnterLab}>
+                进入几何实验室 <span aria-hidden="true">→</span>
+              </button>
+            </div>
           </div>
           <section className="landing-page__capabilities" aria-label="核心能力">
             <article className="landing-page__capability">
