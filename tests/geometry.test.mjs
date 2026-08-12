@@ -34,6 +34,11 @@ import {
   readPersistedBikeSetup,
 } from "../src/config/setupPersistence.js";
 import { buildBikeGeometry } from "../src/lib/geometry/index.js";
+import {
+  LETTER_SIZE_ORDER,
+  classifyBikeSize,
+  sortBikeSizes,
+} from "../src/lib/geometry/sizeSorting.js";
 import { BASE_COCKPIT_STACK_HEIGHT_MM, HEADSET_STACK_HEIGHT, getEffectiveStemPitch } from "../src/lib/geometry/cockpitGeometry.js";
 import {
   PIXELS_PER_MM,
@@ -43,7 +48,21 @@ import {
   createProjector,
   getPhysicalScaleAudit,
 } from "../src/lib/geometry/frameGeometry.js";
-import { bikeArchetypes } from "../src/config/bikeArchetypes.js";
+import {
+  BIKE_CATEGORIES,
+  DEFAULT_BIKE_CATEGORY,
+  bikeArchetypes,
+  getBikeCategoryLabel,
+  resolveFrameVisualPreset,
+} from "../src/config/bikeArchetypes.js";
+import {
+  DEFAULT_ENDURANCE_SEAT_STAY_STYLE,
+  ENDURANCE_SEAT_STAY_STYLES,
+  endurancePreset,
+  normalizeEnduranceSeatStayStyle,
+} from "../src/config/framePresets/endurance.js";
+import { allRoundPreset } from "../src/config/framePresets/allRound.js";
+import { aeroPreset } from "../src/config/framePresets/aero.js";
 import { taperedTubePath } from "../src/lib/bikeVisual/pathGeometry.js";
 import {
   ENDURANCE_VISUAL_BASE_GEOMETRY,
@@ -58,10 +77,49 @@ import {
   composeMatrices,
   getHandlebarContactOffsetMm,
   orientedSegmentTransform,
+  resolveEnduranceSeatStayAnchor,
   resolveAssetAnchor,
   uniformAroundPoint,
 } from "../src/lib/bikeVisual/figmaEnduranceTemplate.js";
+import {
+  FIGMA_ALL_ROUND_TEMPLATE,
+  resolveAllRoundAssetAnchor,
+} from "../src/lib/bikeVisual/figmaAllRoundTemplate.js";
+import {
+  FIGMA_AERO_TEMPLATE,
+  resolveAeroAssetAnchor,
+} from "../src/lib/bikeVisual/figmaAeroTemplate.js";
+import {
+  AERO_VISUAL_CONFIG,
+  getAeroDownTubeShape,
+  getAeroSeatTubeVisualTop,
+  getAeroVisualAnchors,
+} from "../src/lib/bikeVisual/aeroFrameGeometry.js";
 import { getSeatpostVisualAnchors } from "../src/lib/bikeVisual/seatpostGeometry.js";
+import {
+  ALL_ROUND_HEAD_TUBE_SOURCE_HALF_WIDTH_PX,
+  ALL_ROUND_TOP_TUBE_HEAD_SOURCE_HALF_WIDTH_PX,
+  ALL_ROUND_TOP_TUBE_HEAD_JOINT_RATIO,
+  ALL_ROUND_TOP_TUBE_SEAT_SOURCE_HALF_WIDTH_PX,
+  TOP_TUBE_VISUAL_REFERENCES,
+  fitTopTubeJointsToHeadTubeBoundary,
+  getAllRoundTopTubeShape,
+  getTopTubeVisualJoints,
+  intersectInfiniteLines,
+  pointLineDistance,
+} from "../src/lib/bikeVisual/topTubeGeometry.js";
+import {
+  ALL_ROUND_SEAT_TUBE_BOTTOM_SOURCE_HALF_WIDTH_PX,
+  ALL_ROUND_SEAT_TUBE_TOP_SOURCE_HALF_WIDTH_PX,
+  getAllRoundSeatTubeShape,
+} from "../src/lib/bikeVisual/seatTubeGeometry.js";
+import {
+  ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO,
+  ALL_ROUND_DOWN_TUBE_MASK_CLEARANCE_PX,
+  ALL_ROUND_DOWN_TUBE_MAX_HEAD_JOINT_RATIO,
+  ALL_ROUND_DOWN_TUBE_MIN_WHEEL_CLEARANCE_PX,
+  getDownTubeVisualJoints,
+} from "../src/lib/bikeVisual/downTubeGeometry.js";
 import {
   PREVIEW_MOTION_CONFIG,
   getRotationAnimation,
@@ -75,13 +133,23 @@ import {
   ACTIVE_BIKES,
   createBikeFromGeometryImport,
   createComparisonBike,
+  createPresetExperienceBike,
+  createPresetExperiencePack,
   getRenderableComponentSetup,
+  instantiatePresetExperienceBike,
+  updateBikeSeatStayStyle,
   updateBikeSize,
   updateBikeGeometry,
 } from "../src/state/dualBikeState.js";
+import {
+  DEFAULT_PRESET_BIKE_ID,
+  PRESET_EXPERIENCE_IDS,
+  presetExperienceCatalog,
+} from "../src/data/presetExperience.js";
 import { getSTRProfile } from "../src/lib/geometry/strProfile.js";
 import {
   addGeometryImportDraftSize,
+  bikeToGeometryImportDraft,
   copyGeometryImportDraftSize,
   CORE_GEOMETRY_FIELD_KEYS,
   createManualGeometryImportDraft,
@@ -118,7 +186,7 @@ const identityMatrixError = (matrix) => Math.max(
 );
 
 const enduranceTemplateSource = readFileSync(
-  new URL("../src/components/bike/templates/EnduranceBikeTemplate.jsx", import.meta.url),
+  new URL("../src/components/bike/templates/RoadFrameRenderer.jsx", import.meta.url),
   "utf8",
 );
 const bikeVisualizerSource = readFileSync(
@@ -135,6 +203,14 @@ const roadBikeVisualSource = readFileSync(
 );
 const dualBikeControlsSource = readFileSync(
   new URL("../src/components/comparison/DualBikeControls.jsx", import.meta.url),
+  "utf8",
+);
+const presetExperienceControlsSource = readFileSync(
+  new URL("../src/components/preset/PresetExperienceControls.jsx", import.meta.url),
+  "utf8",
+);
+const presetComparisonConfirmModalSource = readFileSync(
+  new URL("../src/components/preset/PresetComparisonConfirmModal.jsx", import.meta.url),
   "utf8",
 );
 const prismSource = readFileSync(
@@ -467,9 +543,40 @@ test("Bike Setup changes contact points and visuals without mutating Frame Geome
   assert.notDeepEqual(configured.contacts.pedal, baseline.contacts.pedal);
 });
 
-test("the runtime exposes Endurance as its only visual archetype", () => {
-  assert.deepEqual(Object.keys(bikeArchetypes), ["endurance"]);
+test("the runtime exposes Endurance, All-Round, and Aero as fixed bike categories over one renderer", () => {
+  assert.deepEqual(BIKE_CATEGORIES, ["endurance", "allRound", "aero"]);
+  assert.equal(DEFAULT_BIKE_CATEGORY, "endurance");
+  assert.deepEqual(Object.keys(bikeArchetypes), ["endurance", "allRound", "aero"]);
   assert.equal(bikeArchetypes.endurance.label, "Endurance");
+  assert.equal(bikeArchetypes.allRound.label, "All-Round");
+  assert.equal(bikeArchetypes.aero.label, "Aero");
+  assert.equal(getBikeCategoryLabel("endurance"), "耐力型");
+  assert.equal(getBikeCategoryLabel("allRound"), "综合型");
+  assert.equal(getBikeCategoryLabel("aero"), "破风型");
+  assert.equal(resolveFrameVisualPreset("unknown"), bikeArchetypes.endurance);
+  assert.equal(allRoundPreset.topTubeStyle, "flatter");
+  assert.equal(allRoundPreset.downTubeStyle, "headTapered");
+  assert.equal(aeroPreset.template, "aero");
+  assert.equal(endurancePreset.topTubeStyle, "sloped");
+  assert.equal(endurancePreset.downTubeStyle, "endurance");
+  assert.deepEqual(allRoundPreset.tubes, endurancePreset.tubes);
+  assert.deepEqual(allRoundPreset.fork, endurancePreset.fork);
+  assert.deepEqual(allRoundPreset.stays, endurancePreset.stays);
+});
+
+test("one size comparator orders numeric, unit, and letter labels without rewriting display text", () => {
+  assert.deepEqual(LETTER_SIZE_ORDER, ["XXS", "XS", "S", "SM", "M", "ML", "L", "XL", "XXL"]);
+  assert.deepEqual(sortBikeSizes(["54", "44", "61", "49", "52"]), ["44", "49", "52", "54", "61"]);
+  assert.deepEqual(sortBikeSizes(["59cm", "47cm", "54cm", "50cm", "52cm"]), ["47cm", "50cm", "52cm", "54cm", "59cm"]);
+  assert.deepEqual(sortBikeSizes(["20寸", "16寸", "18寸"]), ["16寸", "18寸", "20寸"]);
+  assert.deepEqual(sortBikeSizes(["56码", "45码", "52码"]), ["45码", "52码", "56码"]);
+  assert.deepEqual(sortBikeSizes(["XL", "SM", "XXS", "ML", "M", "L", "XS", "XXL", "S"]), LETTER_SIZE_ORDER);
+  assert.deepEqual(
+    sortBikeSizes(["定制乙", "定制甲"], { sourceOrder: ["定制甲", "定制乙"] }),
+    ["定制甲", "定制乙"],
+  );
+  assert.deepEqual(classifyBikeSize("54cm"), { type: "numeric", value: 54 });
+  assert.deepEqual(classifyBikeSize("ML"), { type: "letter", value: 5 });
 });
 
 test("Trek Domane is the only catalog model and stores all seven sizes in millimetres", () => {
@@ -795,19 +902,84 @@ test("workspace bikes keep Geometry, Fit Setup, and Components independent", () 
   assert.deepEqual(deleteWorkspaceBike(twoBikes, 0), [bikeB]);
 });
 
-test("zero-bike Welcome Gate overlays the real demo workspace", () => {
+test("Preset Experience keeps three fixed-category QUICK bikes independent", () => {
+  const setup = createDefaultBikeSetup();
+  const pack = createPresetExperiencePack(setup);
+
+  assert.deepEqual(PRESET_EXPERIENCE_IDS, ["zeitpro", "arone", "erone"]);
+  assert.equal(DEFAULT_PRESET_BIKE_ID, "arone");
+  assert.equal(presetExperienceCatalog.zeitpro.category, "endurance");
+  assert.equal(presetExperienceCatalog.arone.category, "allRound");
+  assert.equal(presetExperienceCatalog.erone.category, "aero");
+  assert.deepEqual(Object.values(pack).map(({ model }) => model), ["ZEIT PRO", "AR:ONE", "ER:ONE"]);
+  assert.deepEqual(Object.values(pack).map(({ category }) => category), ["endurance", "allRound", "aero"]);
+  assert.equal(pack.zeitpro.sizes.length, 5);
+  assert.equal(pack.arone.sizes.length, 6);
+  assert.equal(pack.erone.sizes.length, 6);
+  assert.equal(pack.arone.size, "520");
+  assert.equal(pack.arone.geometry.stack, 552);
+  assert.equal(pack.arone.geometry.reach, 391.4);
+  assert.equal(pack.erone.geometryBySize["550"].wheelbaseMm, 1008);
+  assert.equal(pack.erone.geometryBySize["550"].stackMm, 572);
+  assert.equal(pack.zeitpro.geometryBySize["550"].forkOffsetMm, 45);
+  assert.notStrictEqual(pack.zeitpro.geometryBySize, pack.arone.geometryBySize);
+  assert.notStrictEqual(pack.arone.fitSetup, pack.erone.fitSetup);
+  assert.notStrictEqual(pack.arone.componentSetup, pack.erone.componentSetup);
+
+  const largeZeit = updateBikeSize(pack.zeitpro, "550");
+  assert.equal(largeZeit.size, "550");
+  assert.equal(largeZeit.geometry.wheelbase, 1012.9);
+  const formalBike = instantiatePresetExperienceBike({ ...pack.erone, frameColor: "#ffffff" }, "workspace-a");
+  assert.equal(formalBike.id, "workspace-a");
+  assert.equal(formalBike.category, "aero");
+  assert.equal(formalBike.frameColor, "#ffffff");
+  assert.notStrictEqual(formalBike.geometryBySize, pack.erone.geometryBySize);
+  assert.notStrictEqual(formalBike.fitSetup, pack.erone.fitSetup);
+  assert.equal(createPresetExperienceBike("arone", setup).presetExperienceId, "arone");
+
+  assert.match(appSource, /const \[activePresetBikeId, setActivePresetBikeId\] = useState\(DEFAULT_PRESET_BIKE_ID\)/);
+  assert.match(appSource, /const \[isPresetExperienceMode, setIsPresetExperienceMode\] = useState\(false\)/);
+  assert.match(appSource, /const \[pendingPresetComparisonId, setPendingPresetComparisonId\] = useState\(null\)/);
+  const requestTransitionSource = appSource.match(/const requestPresetComparison = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+  const cancelTransitionSource = appSource.match(/const cancelPresetComparison = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+  assert.match(requestTransitionSource, /setPendingPresetComparisonId\(activePresetBikeId\)/);
+  assert.doesNotMatch(requestTransitionSource, /setBikes|setActiveBikeIndex|setCompareEnabled|setIsPresetExperienceMode|instantiatePresetExperienceBike/);
+  assert.match(cancelTransitionSource, /setPendingPresetComparisonId\(null\)/);
+  assert.doesNotMatch(cancelTransitionSource, /setBikes|setActiveBikeIndex|setCompareEnabled|setIsPresetExperienceMode/);
+  assert.match(appSource, /const confirmPresetComparison = \(\) => \{[\s\S]*instantiatePresetExperienceBike\(pendingPresetComparisonBike, createBikeId\(\)\)[\s\S]*setPendingPresetComparisonId\(null\)[\s\S]*setBikes\(\[bike\]\)[\s\S]*setActiveBikeIndex\(0\)[\s\S]*setCompareEnabled\(false\)[\s\S]*setIsPresetExperienceMode\(false\)/);
+  assert.match(bikeVisualizerSource, /presetExperienceMode \? \([\s\S]*<PresetExperienceControls[\s\S]*\) : \([\s\S]*<DualBikeControls/);
+  assert.match(presetExperienceControlsSource, /role="tablist" aria-label="预设体验车型"/);
+  assert.match(presetExperienceControlsSource, /bike\.presetExperienceId === activePresetBikeId/);
+  assert.match(presetExperienceControlsSource, /Stack as Layers/);
+  assert.match(presetExperienceControlsSource, /进入车型对比[\s\S]*将当前车型作为 Bike A/);
+  assert.doesNotMatch(presetExperienceControlsSource, /添加对比车型|Plus/);
+  assert.doesNotMatch(presetExperienceControlsSource, /onCategory|setCategory|bike\.category\s*=/);
+  assert.match(presetComparisonConfirmModalSource, /进入车型对比？/);
+  assert.match(presetComparisonConfirmModalSource, /将结束三类车架快速体验，并以 \{bike\.model\} · \{bike\.categoryLabel\}作为 Bike A 进入车型对比工作区/);
+  assert.match(presetComparisonConfirmModalSource, /当前体验车型[\s\S]*\{bike\.model\}[\s\S]*\{bike\.categoryLabel\}[\s\S]*\{bike\.size\}码/);
+  assert.match(presetComparisonConfirmModalSource, /进入后将使用正式 A\/B 车型管理与叠层对比模式/);
+  assert.match(presetComparisonConfirmModalSource, />继续体验<[\s\S]*>进入车型对比</);
+  assert.doesNotMatch(appSource + presetComparisonConfirmModalSource, /window\.confirm/);
+  assert.match(stylesSource, /\.preset-experience-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/s);
+  assert.match(stylesSource, /\.preset-experience-tabs button\.is-selected\s*\{[^}]*background:\s*rgba\(22,119,255,\.28\)/s);
+  assert.match(stylesSource, /\.preset-experience-action\s*\{[^}]*justify-self:\s*end;[^}]*height:\s*36px;[^}]*border:\s*0;[^}]*background:\s*var\(--control-bg\);[^}]*box-shadow:\s*none/s);
+  assert.match(stylesSource, /\.preset-comparison-confirm-backdrop\s*\{[^}]*position:\s*fixed;[^}]*background:\s*rgba\(0,0,0,\.68\);[^}]*backdrop-filter:\s*blur\(3px\)/s);
+});
+
+test("zero-bike Welcome Gate opens the three-category Preset Experience", () => {
   assert.equal(WELCOME_COMPLETED_STORAGE_KEY, "bikeGeometryLabWelcomeCompleted");
-  assert.match(appSource, /const showWelcomeGate = bikes\.length === 0 && geometryImportStatus === "ready"/);
+  assert.match(appSource, /const showWelcomeGate = bikes\.length === 0 && !isPresetExperienceMode && geometryImportStatus === "ready"/);
   assert.match(appSource, /const \[geometryImportStatus, setGeometryImportStatus\] = useState\("ready"\)/);
-  assert.match(appSource, /<main[\s\S]*className=\{`workspace[\s\S]*inert=\{showWelcomeGate \? true : undefined\}/);
-  assert.match(appSource, /\{showWelcomeGate && <WelcomeGate onUsePreset=\{useWelcomePreset\} onSelectImage=\{selectWelcomeImage\} onManualEntry=\{startManualGeometryImport\} \/>\}/);
-  assert.match(appSource, /const \[demoBike\] = useState\(\(\) => createComparisonBike\("demo-preview", initialSetup\)\)/);
-  assert.match(appSource, /const useWelcomePreset = \(\) => \{[\s\S]*setBikes\(\[bike\]\);[\s\S]*setActiveBikeIndex\(0\)/);
+  assert.match(appSource, /<main[\s\S]*className=\{`workspace[\s\S]*inert=\{showWelcomeGate \|\| pendingPresetComparisonBike \? true : undefined\}/);
+  assert.match(appSource, /\{showWelcomeGate && <WelcomeGate onStartPresetExperience=\{startPresetExperience\} onSelectImage=\{selectWelcomeImage\} onManualEntry=\{startManualGeometryImport\} \/>\}/);
+  assert.match(appSource, /createPresetExperiencePack\(initialSetup\)/);
+  assert.match(appSource, /const startPresetExperience = \(\) => \{[\s\S]*setActivePresetBikeId\(DEFAULT_PRESET_BIKE_ID\);[\s\S]*setIsPresetExperienceMode\(true\);[\s\S]*setActiveBikeIndex\(null\)/);
   assert.match(appSource, /const selectWelcomeImage = \(file\) => \{[\s\S]*const operation = \{ type: "add", targetIndex: null \};[\s\S]*selectGeometryImage\(file, operation\)/);
   assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
 
   assert.match(welcomeGateSource, /先选一辆车，开始你的几何实验/);
-  assert.match(welcomeGateSource, /使用预设车型体验[\s\S]*TREK Domane/);
+  assert.match(welcomeGateSource, /三类车架快速体验[\s\S]*体验耐力、综合、破风三种公路车几何与车架结构/);
+  assert.doesNotMatch(welcomeGateSource, /TREK Domane/);
   assert.match(welcomeGateSource, /上传官网几何图[\s\S]*官方车架几何图/);
   assert.match(welcomeGateSource, /手动录入几何[\s\S]*根据官网数据手动填写/);
   assert.match(welcomeGateSource, /\.png,\.jpg,\.jpeg,image\/png,image\/jpeg/);
@@ -833,9 +1005,11 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
   assert.deepEqual(emptyDraft.rawRows, []);
   assert.deepEqual(emptyDraft.parserWarnings, []);
   assert.equal(validateGeometryImportDraft(emptyDraft).firstErrorKey, "brand");
+  assert.equal(emptyDraft.category, "endurance");
+  assert.equal(validateGeometryImportDraft({ ...emptyDraft, brand: "Test", category: "unknown" }).firstErrorKey, "category");
 
   let draft = renameGeometryImportDraftSize(emptyDraft, "54");
-  draft = { ...draft, brand: "Specialized", model: "Roubaix" };
+  draft = { ...draft, brand: "Specialized", model: "Roubaix", category: "allRound" };
   for (const [key, value] of Object.entries({
     stack: 585,
     reach: 384,
@@ -864,6 +1038,9 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
   const manualBike = createBikeFromGeometryImport(originalBike, draft);
   assert.deepEqual(manualBike.sizes, ["54"]);
   assert.equal(manualBike.sourceLabel, "手动几何数据");
+  assert.equal(manualBike.category, "allRound");
+  assert.equal(manualBike.categoryLabel, "综合型");
+  assert.equal(bikeToGeometryImportDraft(manualBike).category, "allRound");
   assert.equal(manualBike.importSource.entryMode, "manual");
   assert.equal(manualBike.importSource.geometryValueSource, "manual");
   assert.equal(manualBike.geometrySources.stack, "manual");
@@ -876,10 +1053,17 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
     estimated: 7,
   });
 
+  const aeroBike = createBikeFromGeometryImport(originalBike, { ...draft, category: "aero" });
+  assert.equal(aeroBike.category, "aero");
+  assert.equal(aeroBike.categoryLabel, "破风型");
+  assert.equal(bikeToGeometryImportDraft(aeroBike).category, "aero");
+
   assert.match(geometryImportFlowSource, /<h3>基础信息<\/h3>[\s\S]*不会调用图片识别/);
   assert.match(geometryImportFlowSource, /<h3>核心几何<\/h3>[\s\S]*showRequired/);
   assert.match(geometryImportFlowSource, /<h3>补充几何<\/h3>[\s\S]*部分参数将使用模板估算/);
   assert.match(geometryImportFlowSource, /复制当前尺码参数/);
+  assert.match(geometryImportFlowSource, /BIKE_CATEGORIES\.map/);
+  assert.match(geometryImportFlowSource, /创建后作为车型固定属性，可在修改几何参数中调整/);
   assert.match(framePanelSource, /isManualImport \? "手动录入 · 本地 Draft · 不调用 AI"/);
 });
 
@@ -901,6 +1085,21 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.equal(draft.model, "");
   assert.notStrictEqual(draft.sizes[54], secondDraft.sizes[54]);
 
+  const orderGeometry = { ...draft.candidateSizes[54] };
+  let clickOrderedDraft = {
+    ...draft,
+    candidateSizes: Object.fromEntries(["44", "49", "52", "54", "61"].map((size) => [size, { ...orderGeometry }])),
+    sizes: { 54: { ...orderGeometry } },
+    detectedSizes: ["44", "49", "52", "54", "61"],
+    selectedImportSizes: ["54"],
+    selectedSize: "54",
+  };
+  for (const size of ["44", "61", "49", "52"]) {
+    clickOrderedDraft = toggleGeometryImportSize(clickOrderedDraft, size);
+  }
+  assert.deepEqual(clickOrderedDraft.selectedImportSizes, ["44", "49", "52", "54", "61"]);
+  assert.deepEqual(Object.keys(clickOrderedDraft.sizes), ["44", "49", "52", "54", "61"]);
+
   const edited = updateGeometryImportDraftField(draft, "54", "stack", "582");
   assert.equal(edited.sizes[54].stack, 582);
   assert.equal(draft.sizes[54].stack, 575);
@@ -908,7 +1107,7 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.equal(validateGeometryImportDraft(identified).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, model: "" }).isValid, true);
   const withAdjacentSize = toggleGeometryImportSize(identified, "49");
-  assert.deepEqual(withAdjacentSize.selectedImportSizes, ["54", "49"]);
+  assert.deepEqual(withAdjacentSize.selectedImportSizes, ["49", "54"]);
   assert.equal(withAdjacentSize.selectedSize, "49");
   const invalid = updateGeometryImportDraftField(withAdjacentSize, "49", "headTubeAngle", "92");
   assert.equal(validateGeometryImportDraft(invalid).firstInvalidSize, "49");
@@ -958,10 +1157,10 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
 
   assert.match(appSource, /createBikeFromGeometryImport\(base, geometryImportDraft, geometryImportImage\)/);
   assert.match(appSource, /createBikeFromGeometryImport\(currentBike, geometryImportDraft, geometryImportImage \?\? currentBike\.geometryImage\)/);
-  assert.match(framePanelSource, /options=\{bike\.sizes\}/);
+  assert.match(framePanelSource, /options=\{orderedSizes\}/);
   assert.match(framePanelSource, /className="frame-model-section"[\s\S]*model-action-slot/);
   assert.match(framePanelSource, /tabIndex=\{bike\.source === "upload" \? 0 : -1\}/);
-  assert.match(framePanelSource, /className="size-selector-area"[\s\S]*<SegmentedControl className="size-selector-grid" options=\{bike\.sizes\}/);
+  assert.match(framePanelSource, /className="size-selector-area"[\s\S]*<SegmentedControl className="size-selector-grid" options=\{orderedSizes\}/);
   assert.doesNotMatch(appSource, /<FrameGeometryPanel[^>]*key=\{/);
   assert.match(stylesSource, /\.frame-panel \.section-title\s*\{[^}]*min-height:\s*28px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
   assert.match(stylesSource, /\.model-action-slot\s*\{[^}]*width:\s*96px;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none/);
@@ -1138,7 +1337,7 @@ test("stage fullscreen replaces local zoom controls and preserves the mounted wo
   assert.match(stylesSource, /translateX\(20px\) scale\(\.985\)/);
   assert.doesNotMatch(appSource, /setTimeout|setInterval/);
   assert.match(stylesSource, /prefers-reduced-motion:[^)]*reduce[\s\S]*transition-duration:\s*\.01ms !important/);
-  assert.match(bikeVisualizerSource, /<FullscreenGeometrySummary[\s\S]*bikes=\{bikes\}[\s\S]*activeBikeIndex=\{activeBikeIndex\}[\s\S]*compareEnabled=\{compareEnabled\}[\s\S]*visible=\{isStageFullscreen\}/);
+  assert.match(bikeVisualizerSource, /<FullscreenGeometrySummary[\s\S]*bikes=\{presetExperienceMode \? \[demoBike\] : bikes\}[\s\S]*activeBikeIndex=\{presetExperienceMode \? 0 : activeBikeIndex\}[\s\S]*compareEnabled=\{presetExperienceMode \? false : compareEnabled\}[\s\S]*visible=\{isStageFullscreen\}/);
   assert.match(fullscreenGeometrySummarySource, /bikes\.length === 2 && compareEnabled/);
   assert.doesNotMatch(fullscreenGeometrySummarySource, /getSTRProfile|STR \{|fullscreen-geometry-summary__identity/);
   assert.match(fullscreenGeometrySummarySource, /const displayedBikes = isComparison[\s\S]*bikes\.map\(\(bike, bikeIndex\) => \(\{ bike, bikeIndex \}\)\)[\s\S]*bike: bikes\[safeActiveIndex\]/);
@@ -1279,14 +1478,14 @@ test("bicycle resources render without SVG or CSS shadow effects", () => {
   assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
 });
 
-test("production frame and fork expose colorable bodies while axle rods stay fixed black at 30%", () => {
+test("production frame and fork expose colorable bodies while axle rods preserve the latest Figma gray", () => {
   assert.match(frameBottomBracketSource, /fill="black"/);
   assert.match(frameBottomBracketSource, /width="113\.192"[^>]*viewBox="0 0 113\.192 88\.8519"/);
   assert.match(frameBottomBracketSource, /<path id="Subtract"[^>]*C83\.911 34\.2797 120\.386 -9\.29462[^>]*M55\.103 55\.165C47\.9234/);
   assert.doesNotMatch(frameBottomBracketSource, /id="&#228;&#186;&#148;&#233;&#128;&#154;_2"/);
   assert.match(forkSource, /<path[^>]*fill="black"/);
-  assert.match(forkSource, /<circle[^>]*fill="#000000"[^>]*fill-opacity="0\.3"/);
-  assert.match(frameChainstaySource, /<circle[^>]*fill="#000000"[^>]*fill-opacity="0\.3"/);
+  assert.match(forkSource, /<circle[^>]*fill="#878787"/);
+  assert.match(frameChainstaySource, /<circle[^>]*fill="#878787"/);
   assert.match(stylesSource, /\.figma-bike-template \.figma-bike__frame,[\s\S]*?\.figma-bike-template \.figma-bike__fork\s*\{[^}]*filter:\s*none;/);
   assert.match(stylesSource, /\.figma-bike-template \.figma-bike__handlebar-tape\s*\{[^}]*filter:\s*none;/);
 });
@@ -1351,9 +1550,9 @@ test("frame, fork, and bar tape colors are preset-driven, independent, and persi
   assert.match(stylesSource, /\.color-swatch--custom\s*\{[^}]*background:\s*conic-gradient\(/s);
   assert.doesNotMatch(colorPaletteSource, /color-custom-button|<span>自定义色值<\/span>/);
 
-  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameDownTubeSource, "black", components\.frameColor\)/);
-  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(forkSource, "black", components\.forkColor\)/);
-  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(handlebarTapeSource, "#D9D9D9", components\.barTapeColor\)/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(downTubeSource, "black", components\.frameColor\)/);
+  assert.match(enduranceTemplateSource, /const forkAsset = colorizedSvgAsset\([\s\S]*isAero \? aeroForkSource[\s\S]*components\.forkColor/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(activeHandlebarTapeSource, "#D9D9D9", components\.barTapeColor\)/);
   assert.match(enduranceTemplateSource, /data-frame-color=\{components\.frameColor\}/);
   assert.match(enduranceTemplateSource, /data-fork-color=\{components\.forkColor\}/);
   assert.match(enduranceTemplateSource, /data-bar-tape-color=\{components\.barTapeColor\}/);
@@ -1646,8 +1845,408 @@ test("Figma split frame body mapping keeps BB, rear axle and seat cluster author
   }
 });
 
-test("Figma endurance frame uses the new semantic split nodes", () => {
-  assert.equal(FIGMA_ENDURANCE_TEMPLATE.source, "Figma / 耐力架 / 1:823");
+test("Endurance seat stay style selects exactly one Figma connection anchor and defaults to mid", () => {
+  const source = FIGMA_ENDURANCE_TEMPLATE.anchors;
+  assert.deepEqual(ENDURANCE_SEAT_STAY_STYLES, ["low", "mid", "high"]);
+  assert.equal(DEFAULT_ENDURANCE_SEAT_STAY_STYLE, "mid");
+  assert.equal(endurancePreset.seatStayStyle, "mid");
+  assert.equal(normalizeEnduranceSeatStayStyle("unknown"), "mid");
+  assert.deepEqual(source.seatStayHighConnection, { x: 792, y: 488 });
+  assert.deepEqual(source.seatStayMidConnection, { x: 806, y: 539 });
+  assert.deepEqual(source.seatStayLowConnection, { x: 820, y: 590 });
+
+  const bike = createComparisonBike("seat-stay", createDefaultBikeSetup());
+  assert.equal(bike.seatStayStyle, "mid");
+  assert.equal(updateBikeSeatStayStyle(bike, "low").seatStayStyle, "low");
+  assert.equal(updateBikeSeatStayStyle(bike, "high").seatStayStyle, "high");
+  assert.strictEqual(updateBikeSeatStayStyle(bike, "unsupported"), bike);
+
+  for (const style of ENDURANCE_SEAT_STAY_STYLES) {
+    const selected = resolveEnduranceSeatStayAnchor(style);
+    const matrix = orientedSegmentTransform(
+      source.rearAxle,
+      source.seatStayHighConnection,
+      source.rearAxle,
+      selected.point,
+      1,
+    );
+    const mappedRear = applyMatrix(matrix, source.rearAxle);
+    const mappedConnection = applyMatrix(matrix, source.seatStayHighConnection);
+    assert.ok(Math.hypot(mappedRear.x - source.rearAxle.x, mappedRear.y - source.rearAxle.y) < 1e-9);
+    assert.ok(Math.hypot(mappedConnection.x - selected.point.x, mappedConnection.y - selected.point.y) < 1e-9);
+  }
+
+  assert.match(enduranceTemplateSource, /transform=\{seatStayMatrix\} className="figma-bike__frame-part figma-bike__seatstay"/);
+  assert.equal((enduranceTemplateSource.match(/asset=\{frameAssets\.seatstay\}/g) ?? []).length, 1);
+  assert.match(enduranceTemplateSource, /const activeSeatStayStyle = isAero \? null : normalizeEnduranceSeatStayStyle\(seatStayStyle\)/);
+  assert.match(enduranceTemplateSource, /data-seat-stay-style=\{activeSeatStayStyle \?\? undefined\}/);
+  assert.match(bikeVisualizerSource, /seatStayStyle=\{bike\.seatStayStyle\}/);
+  assert.match(framePanelSource, /bike\.category !== "aero"[\s\S]*label="后上叉连接"[\s\S]*value=\{bike\.seatStayStyle \?\? "mid"\}/);
+  assert.match(appSource, /updateBikeSeatStayStyle\(current, style\)/);
+});
+
+test("All-Round solves its TopTube joints from HeadTop and the current SeatTube without moving Geometry", () => {
+  const enduranceBike = createComparisonBike("visual-preset", createDefaultBikeSetup());
+  const allRoundBike = { ...enduranceBike, category: "allRound", categoryLabel: "综合型" };
+  assert.equal(enduranceBike.category, "endurance");
+  assert.equal(allRoundBike.category, "allRound");
+  assert.deepEqual(allRoundBike.geometry, enduranceBike.geometry);
+  assert.deepEqual(allRoundBike.sizeData, enduranceBike.sizeData);
+  assert.deepEqual(allRoundBike.fitSetup, enduranceBike.fitSetup);
+  assert.deepEqual(allRoundBike.componentSetup, enduranceBike.componentSetup);
+
+  const enduranceRenderData = buildBikeGeometry(enduranceBike.geometry, toGeometryFit(enduranceBike.fitSetup));
+  const allRoundRenderData = buildBikeGeometry(allRoundBike.geometry, toGeometryFit(allRoundBike.fitSetup));
+  assert.deepEqual(allRoundRenderData.frame, enduranceRenderData.frame);
+  assert.deepEqual(allRoundRenderData.anchors, enduranceRenderData.anchors);
+  assert.deepEqual(allRoundRenderData.cockpit, enduranceRenderData.cockpit);
+
+  const sampleGeometry = {
+    ...ENDURANCE_VISUAL_BASE_GEOMETRY,
+    stack: 565,
+    reach: 395,
+    seatAngle: 73.5,
+    headAngle: 73.5,
+  };
+  const sample = buildBikeGeometry(sampleGeometry, defaultFit);
+  const project = createProjector();
+  const bottomBracket = project(sample.anchors.bottomBracket);
+  const seatCluster = project(sample.anchors.seatTubeTop);
+  const headTop = project(sample.anchors.headTubeTop);
+  const headBottom = project(sample.anchors.headTubeBottom);
+  const enduranceJoints = getTopTubeVisualJoints({ category: "endurance", bottomBracket, seatCluster, headTop, headBottom });
+  const allRoundJoints = getTopTubeVisualJoints({ category: "allRound", bottomBracket, seatCluster, headTop, headBottom });
+  assert.deepEqual(enduranceJoints.topTubeSeatJoint, seatCluster);
+  assert.deepEqual(enduranceJoints.topTubeHeadJoint, headTop);
+  assert.ok(pointLineDistance(allRoundJoints.topTubeSeatJoint, bottomBracket, seatCluster) < 1e-9);
+  assert.equal(ALL_ROUND_TOP_TUBE_HEAD_JOINT_RATIO, 0.82);
+  assert.ok(pointLineDistance(allRoundJoints.topTubeHeadJoint, headBottom, headTop) < 1e-9);
+  assert.ok(Math.hypot(
+    allRoundJoints.topTubeHeadJoint.x - (headBottom.x + (headTop.x - headBottom.x) * 0.82),
+    allRoundJoints.topTubeHeadJoint.y - (headBottom.y + (headTop.y - headBottom.y) * 0.82),
+  ) < 1e-9);
+  assert.equal(allRoundJoints.usedFallback, false);
+  const allRoundSlope = (allRoundJoints.topTubeHeadJoint.y - allRoundJoints.topTubeSeatJoint.y)
+    / (allRoundJoints.topTubeHeadJoint.x - allRoundJoints.topTubeSeatJoint.x);
+  const enduranceSlope = (headTop.y - seatCluster.y) / (headTop.x - seatCluster.x);
+  assert.ok(Math.abs(allRoundSlope - TOP_TUBE_VISUAL_REFERENCES.allRound.centerlineSlope) < 1e-9);
+  assert.ok(Math.abs(allRoundSlope) < Math.abs(enduranceSlope));
+  assert.deepEqual(sample.geometry, sampleGeometry);
+
+  const enduranceTopTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/endurance/frame-top-tube.svg", import.meta.url),
+    "utf8",
+  );
+  const allRoundTopTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/allRound/frame-top-tube.svg", import.meta.url),
+    "utf8",
+  );
+  assert.match(enduranceTopTubeSource, /L4\.5 101\.5L0 87\.5/);
+  assert.match(allRoundTopTubeSource, /L5\.99976 104L0 84\.5/);
+  assert.match(allRoundTopTubeSource, /M373\.847 42\.308/);
+  assert.doesNotMatch(enduranceTemplateSource, /allRoundFrameTopTubeSource/);
+  assert.match(enduranceTemplateSource, /const topTubeLayer = isAero[\s\S]*aeroLayers\.frameTopTube[\s\S]*allRoundLayers\.frameTopTube/);
+  assert.match(enduranceTemplateSource, /asset=\{frameAssets\.topTube\} layer=\{topTubeLayer\} transform=\{topTubeMatrix\}/);
+  assert.match(enduranceTemplateSource, /getTopTubeVisualJoints\(\{[\s\S]*bottomBracket: parentAnchors\.bottomBracket,[\s\S]*seatCluster: parentAnchors\.seatpostSocketAnchor,[\s\S]*headTop: parentAnchors\.headTop/);
+  assert.match(enduranceTemplateSource, /const visualTopTubeMatrix = orientedSegmentTransform\(/);
+  assert.match(enduranceTemplateSource, /data-top-tube-seat-line-error-px=\{topTubeSeatLineErrorPx\.toFixed\(9\)\}/);
+  assert.match(enduranceTemplateSource, /data-top-tube-head-line-error-px=\{topTubeHeadLineErrorPx\.toFixed\(9\)\}/);
+  assert.equal((roadBikeVisualSource.match(/<RoadFrameRenderer/g) ?? []).length, 1);
+  assert.doesNotMatch(roadBikeVisualSource, /AllRoundBikeTemplate|AllRoundBikeRenderer/);
+  assert.match(bikeVisualizerSource, /resolveFrameVisualPreset\(bike\.category\)/);
+  assert.doesNotMatch(framePanelSource, /label="车架视觉"|setFrameVisualPreset|frameVisualPreset/);
+  assert.doesNotMatch(appSource, /updateBikeFrameVisualPreset|setFrameVisualPreset/);
+  assert.match(framePanelSource, /\{bike\.categoryLabel\}/);
+});
+
+test("All-Round programmatic TopTube derives all four corners from live tube boundaries", () => {
+  const project = createProjector();
+  const figmaShapeScale = RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
+  const seatTubeTopHalfWidthPx = ALL_ROUND_SEAT_TUBE_TOP_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+  const seatTubeBottomHalfWidthPx = ALL_ROUND_SEAT_TUBE_BOTTOM_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+  const headTubeHalfWidthPx = ALL_ROUND_HEAD_TUBE_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+  const topTubeSeatHalfWidthPx = ALL_ROUND_TOP_TUBE_SEAT_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+  const topTubeHeadHalfWidthPx = ALL_ROUND_TOP_TUBE_HEAD_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+  const lineSide = (point, start, end) => (
+    (end.x - start.x) * (point.y - start.y)
+    - (end.y - start.y) * (point.x - start.x)
+  );
+  const staysOnReferenceSide = (point, reference, start, end) => (
+    lineSide(point, start, end) * Math.sign(lineSide(reference, start, end) || 1) >= -1e-8
+  );
+
+  for (const size of ["44", "52", "54", "56", "61"]) {
+    const geometry = toBikeGeometry(getTrekDomaneSize(size));
+    const renderData = buildBikeGeometry(geometry, defaultFit);
+    const originalGeometry = structuredClone(renderData.geometry);
+    const originalFrame = structuredClone(renderData.frame);
+    const bottomBracket = project(renderData.anchors.bottomBracket);
+    const seatCluster = project(renderData.anchors.seatTubeTop);
+    const headTop = project(renderData.anchors.headTubeTop);
+    const headBottom = project(renderData.anchors.headTubeBottom);
+    const joints = getTopTubeVisualJoints({
+      category: "allRound",
+      bottomBracket,
+      seatCluster,
+      headTop,
+      headBottom,
+    });
+    const seatTubeShape = getAllRoundSeatTubeShape({
+      bottomBracket,
+      seatTubeTop: seatCluster,
+      towardPoint: joints.topTubeHeadJoint,
+      topHalfWidthPx: seatTubeTopHalfWidthPx,
+      bottomHalfWidthPx: seatTubeBottomHalfWidthPx,
+    });
+    const shape = getAllRoundTopTubeShape({
+      bottomBracket,
+      seatCluster,
+      seatTubeBoundaryStart: seatTubeShape.headwardBottom,
+      seatTubeBoundaryEnd: seatTubeShape.headwardTop,
+      headBottom,
+      headTop,
+      topTubeSeatJoint: joints.topTubeSeatJoint,
+      topTubeHeadJoint: joints.topTubeHeadJoint,
+      headTubeHalfWidthPx,
+      topTubeSeatHalfWidthPx,
+      topTubeHeadHalfWidthPx,
+    });
+    const headBoundaryEnd = {
+      x: shape.headTubeOuterBoundaryPoint.x + shape.headTubeDirection.x * 100,
+      y: shape.headTubeOuterBoundaryPoint.y + shape.headTubeDirection.y * 100,
+    };
+
+    assert.ok(pointLineDistance(joints.topTubeSeatJoint, bottomBracket, seatCluster) < 1e-9, `${size} center joint stays on the SeatTube axis`);
+    assert.ok(pointLineDistance(joints.topTubeHeadJoint, headBottom, headTop) < 1e-9, `${size} center joint stays on the HeadTube axis`);
+    assert.ok(pointLineDistance(shape.upperSeatIntersection, seatTubeShape.headwardBottom, seatTubeShape.headwardTop) < 1e-9, `${size} upper Seat corner comes from the tapered SeatTube boundary`);
+    assert.ok(pointLineDistance(shape.lowerSeatIntersection, seatTubeShape.headwardBottom, seatTubeShape.headwardTop) < 1e-9, `${size} lower Seat corner comes from the tapered SeatTube boundary`);
+    assert.ok(pointLineDistance(shape.upperHeadIntersection, shape.headTubeOuterBoundaryPoint, headBoundaryEnd) < 1e-9, `${size} upper Head corner comes from the HeadTube boundary`);
+    assert.ok(pointLineDistance(shape.lowerHeadIntersection, shape.headTubeOuterBoundaryPoint, headBoundaryEnd) < 1e-9, `${size} lower Head corner comes from the HeadTube boundary`);
+    for (const point of shape.points) {
+      assert.ok(staysOnReferenceSide(point, joints.topTubeHeadJoint, seatTubeShape.headwardBottom, seatTubeShape.headwardTop), `${size} polygon never crosses behind the tapered SeatTube boundary`);
+      assert.ok(staysOnReferenceSide(point, joints.topTubeSeatJoint, shape.headTubeOuterBoundaryPoint, headBoundaryEnd), `${size} polygon never crosses through the HeadTube boundary`);
+    }
+    assert.equal(shape.points.length, 4);
+    assert.ok(shape.points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)));
+    assert.match(shape.path, /^M[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+Z$/);
+    assert.deepEqual(renderData.geometry, originalGeometry);
+    assert.deepEqual(renderData.frame, originalFrame);
+  }
+
+  assert.match(enduranceTemplateSource, /getAllRoundTopTubeShape\(\{/);
+  assert.match(enduranceTemplateSource, /data-top-tube-runtime-source=\{usesProgrammaticRoadTubes \? "programmatic-closed-path" : "figma-svg"\}/);
+  assert.match(enduranceTemplateSource, /data-render-layer="top-tube-programmatic-all-round"/);
+  assert.match(enduranceTemplateSource, /d=\{programmaticTopTubeShape\.path\}/);
+  assert.doesNotMatch(enduranceTemplateSource, /allRoundTopTubeSeatClipId|data-all-round-top-tube-seat-cut|top-tube-seat-joint-patch/);
+});
+
+test("All-Round programmatic SeatTube keeps a size-independent taper on the live SeatTube axis", () => {
+  const project = createProjector();
+  const figmaShapeScale = RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
+  const topHalfWidthPx = ALL_ROUND_SEAT_TUBE_TOP_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+  const bottomHalfWidthPx = ALL_ROUND_SEAT_TUBE_BOTTOM_SOURCE_HALF_WIDTH_PX * figmaShapeScale;
+
+  for (const size of ["44", "52", "54", "56", "61"]) {
+    const geometry = toBikeGeometry(getTrekDomaneSize(size));
+    const renderData = buildBikeGeometry(geometry, defaultFit);
+    const originalGeometry = structuredClone(renderData.geometry);
+    const originalFrame = structuredClone(renderData.frame);
+    const bottomBracket = project(renderData.anchors.bottomBracket);
+    const seatTubeTop = project(renderData.anchors.seatTubeTop);
+    const headTop = project(renderData.anchors.headTubeTop);
+    const shape = getAllRoundSeatTubeShape({
+      bottomBracket,
+      seatTubeTop,
+      towardPoint: headTop,
+      topHalfWidthPx,
+      bottomHalfWidthPx,
+    });
+    const topMidpoint = {
+      x: (shape.headwardTop.x + shape.rearwardTop.x) / 2,
+      y: (shape.headwardTop.y + shape.rearwardTop.y) / 2,
+    };
+    const bottomMidpoint = {
+      x: (shape.headwardBottom.x + shape.rearwardBottom.x) / 2,
+      y: (shape.headwardBottom.y + shape.rearwardBottom.y) / 2,
+    };
+
+    assert.ok(Math.hypot(topMidpoint.x - seatTubeTop.x, topMidpoint.y - seatTubeTop.y) < 1e-9, `${size} top remains centered on SeatTubeTop`);
+    assert.ok(Math.hypot(bottomMidpoint.x - bottomBracket.x, bottomMidpoint.y - bottomBracket.y) < 1e-9, `${size} bottom remains centered on BB`);
+    assert.ok(Math.abs(Math.hypot(shape.headwardTop.x - shape.rearwardTop.x, shape.headwardTop.y - shape.rearwardTop.y) - topHalfWidthPx * 2) < 1e-9, `${size} top width is template-fixed`);
+    assert.ok(Math.abs(Math.hypot(shape.headwardBottom.x - shape.rearwardBottom.x, shape.headwardBottom.y - shape.rearwardBottom.y) - bottomHalfWidthPx * 2) < 1e-9, `${size} bottom width is template-fixed`);
+    assert.ok(topHalfWidthPx < bottomHalfWidthPx, `${size} uses a restrained bottom-heavy taper`);
+    assert.ok(pointLineDistance(topMidpoint, bottomBracket, seatTubeTop) < 1e-9);
+    assert.ok(pointLineDistance(bottomMidpoint, bottomBracket, seatTubeTop) < 1e-9);
+    assert.equal(shape.points.length, 4);
+    assert.match(shape.path, /^M[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+Z$/);
+    assert.deepEqual(renderData.geometry, originalGeometry);
+    assert.deepEqual(renderData.frame, originalFrame);
+  }
+
+  assert.match(enduranceTemplateSource, /data-seat-tube-runtime-source=\{usesProgrammaticRoadTubes \? "programmatic-tapered-path" : "figma-svg"\}/);
+  assert.match(enduranceTemplateSource, /data-render-layer="seat-tube-programmatic-all-round"/);
+  assert.match(enduranceTemplateSource, /d=\{programmaticSeatTubeShape\.path\}/);
+  assert.doesNotMatch(enduranceTemplateSource, /allRoundFrameSeatTubeSource/);
+});
+
+test("All-Round tapers only the DownTube visual and derives its HeadJoint along the current HeadTube", () => {
+  const sampleGeometry = {
+    ...ENDURANCE_VISUAL_BASE_GEOMETRY,
+    stack: 565,
+    reach: 395,
+    seatAngle: 73.5,
+    headAngle: 73.5,
+  };
+  const sample = buildBikeGeometry(sampleGeometry, defaultFit);
+  const originalFrame = structuredClone(sample.frame);
+  const project = createProjector();
+  const bottomBracket = project(sample.anchors.bottomBracket);
+  const headBottom = project(sample.anchors.headTubeBottom);
+  const headTop = project(sample.anchors.headTubeTop);
+  const enduranceJoints = getDownTubeVisualJoints({ category: "endurance", bottomBracket, headBottom, headTop });
+  const allRoundJoints = getDownTubeVisualJoints({ category: "allRound", bottomBracket, headBottom, headTop });
+
+  assert.equal(ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO, 0.12);
+  assert.deepEqual(enduranceJoints.downTubeBbJoint, bottomBracket);
+  assert.deepEqual(enduranceJoints.downTubeHeadJoint, headBottom);
+  assert.deepEqual(allRoundJoints.downTubeBbJoint, bottomBracket);
+  assert.ok(pointLineDistance(allRoundJoints.downTubeHeadJoint, headBottom, headTop) < 1e-9);
+  assert.equal(allRoundJoints.clearance.headJointRatio, ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO);
+  assert.ok(allRoundJoints.clearance.headJointRatio <= ALL_ROUND_DOWN_TUBE_MAX_HEAD_JOINT_RATIO);
+  assert.deepEqual(sample.frame, originalFrame);
+
+  const allRoundDownTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/allRound/frame-down-tube.svg", import.meta.url),
+    "utf8",
+  );
+  assert.equal((allRoundDownTubeSource.match(/<path /g) ?? []).length, 4);
+  assert.match(allRoundDownTubeSource, /M335\.384 35\.5/);
+  assert.match(allRoundDownTubeSource, /45\.917 378\.409/);
+  assert.match(allRoundDownTubeSource, /25\.8839 361\.5/);
+  assert.match(allRoundDownTubeSource, /M326\.384 53/);
+  assert.match(enduranceTemplateSource, /const downTubeSource = isAllRound \? allRoundFrameDownTubeSource : frameDownTubeSource/);
+  assert.match(enduranceTemplateSource, /const downTubeLayer = isAllRound \? allRoundLayers\.frameDownTube : layers\.frameDownTube/);
+  assert.match(enduranceTemplateSource, /getDownTubeVisualJoints\(\{[\s\S]*headBottom: parentAnchors\.headBottom,[\s\S]*headTop: parentAnchors\.headTop,[\s\S]*frontAxle: projected\.frontAxle,[\s\S]*frontWheelOuterRadius: wheelDiameter \/ 2/);
+  assert.match(enduranceTemplateSource, /const downTubeMatrix = isAllRound \|\| isAero/);
+  assert.match(enduranceTemplateSource, /data-down-tube-head-line-error-px=\{downTubeHeadLineErrorPx\.toFixed\(9\)\}/);
+  assert.match(enduranceTemplateSource, /mask=\{`url\(#\$\{allRoundClearanceMaskId\}\)`\}/);
+  assert.match(enduranceTemplateSource, /data-all-round-down-tube-clearance-mask=\{ALL_ROUND_DOWN_TUBE_MASK_CLEARANCE_PX\}/);
+  assert.match(roadBikeVisualSource, /downTubeStyle=\{preset\.downTubeStyle\}/);
+});
+
+test("All-Round DownTube keeps visual clearance from the front wheel across QUICK sizes", () => {
+  const setup = createDefaultBikeSetup();
+  const baseBike = createPresetExperienceBike("arone", setup);
+  const project = createProjector();
+
+  assert.equal(ALL_ROUND_DOWN_TUBE_MAX_HEAD_JOINT_RATIO, 0.38);
+  assert.equal(ALL_ROUND_DOWN_TUBE_MIN_WHEEL_CLEARANCE_PX, 4);
+  assert.equal(ALL_ROUND_DOWN_TUBE_MASK_CLEARANCE_PX, 4);
+
+  for (const size of ["430", "520", "580"]) {
+    const bike = updateBikeSize(baseBike, size);
+    const renderData = buildBikeGeometry(bike.geometry, toGeometryFit(bike.fitSetup));
+    const originalFrame = structuredClone(renderData.frame);
+    const bottomBracket = project(renderData.anchors.bottomBracket);
+    const headBottom = project(renderData.anchors.headTubeBottom);
+    const headTop = project(renderData.anchors.headTubeTop);
+    const frontAxle = project(renderData.anchors.frontAxle);
+    const joints = getDownTubeVisualJoints({
+      category: "allRound",
+      bottomBracket,
+      headBottom,
+      headTop,
+      frontAxle,
+      frontWheelOuterRadius: RENDERED_WHEEL_DIAMETER_PX / 2,
+    });
+
+    assert.ok(joints.clearance.constrained, `size ${size} enables the wheel-clearance solver`);
+    assert.ok(joints.clearance.headJointRatio >= ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO);
+    assert.ok(joints.clearance.headJointRatio <= ALL_ROUND_DOWN_TUBE_MAX_HEAD_JOINT_RATIO);
+    assert.ok(joints.clearance.effectiveClearancePx >= ALL_ROUND_DOWN_TUBE_MIN_WHEEL_CLEARANCE_PX);
+    assert.ok(pointLineDistance(joints.downTubeHeadJoint, headBottom, headTop) < 1e-9);
+    assert.deepEqual(renderData.frame, originalFrame);
+  }
+
+  const size520 = updateBikeSize(baseBike, "520");
+  const data520 = buildBikeGeometry(size520.geometry, toGeometryFit(size520.fitSetup));
+  const constrained520 = getDownTubeVisualJoints({
+    category: "allRound",
+    bottomBracket: project(data520.anchors.bottomBracket),
+    headBottom: project(data520.anchors.headTubeBottom),
+    headTop: project(data520.anchors.headTubeTop),
+    frontAxle: project(data520.anchors.frontAxle),
+    frontWheelOuterRadius: RENDERED_WHEEL_DIAMETER_PX / 2,
+  });
+  assert.ok(constrained520.clearance.headJointRatio > ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO);
+  assert.ok(constrained520.clearance.estimatedClearancePx >= ALL_ROUND_DOWN_TUBE_MIN_WHEEL_CLEARANCE_PX);
+  assert.equal(constrained520.clearance.pathRetreatPx, 0);
+});
+
+test("All-Round HeadTube joints remain geometry-bound across short and tall frame sizes", () => {
+  for (const { stack, reach } of [
+    { stack: 501, reach: 366 },
+    { stack: 544, reach: 384 },
+  ]) {
+    const geometry = {
+      ...ENDURANCE_VISUAL_BASE_GEOMETRY,
+      stack,
+      reach,
+      seatAngle: 73.5,
+      headAngle: 73.5,
+    };
+    const renderData = buildBikeGeometry(geometry, defaultFit);
+    const originalAnchors = structuredClone(renderData.anchors);
+    const originalFrame = structuredClone(renderData.frame);
+    const project = createProjector();
+    const bottomBracket = project(renderData.anchors.bottomBracket);
+    const seatCluster = project(renderData.anchors.seatTubeTop);
+    const headBottom = project(renderData.anchors.headTubeBottom);
+    const headTop = project(renderData.anchors.headTubeTop);
+    const topTube = getTopTubeVisualJoints({
+      category: "allRound",
+      bottomBracket,
+      seatCluster,
+      headBottom,
+      headTop,
+    });
+    const downTube = getDownTubeVisualJoints({
+      category: "allRound",
+      bottomBracket,
+      headBottom,
+      headTop,
+    });
+
+    const headTubeLength = Math.hypot(headTop.x - headBottom.x, headTop.y - headBottom.y);
+    const topJointFromBottom = Math.hypot(
+      topTube.topTubeHeadJoint.x - headBottom.x,
+      topTube.topTubeHeadJoint.y - headBottom.y,
+    );
+    const downJointFromBottom = Math.hypot(
+      downTube.downTubeHeadJoint.x - headBottom.x,
+      downTube.downTubeHeadJoint.y - headBottom.y,
+    );
+
+    assert.ok(pointLineDistance(topTube.topTubeSeatJoint, bottomBracket, seatCluster) < 1e-9);
+    assert.ok(pointLineDistance(topTube.topTubeHeadJoint, headBottom, headTop) < 1e-9);
+    assert.ok(pointLineDistance(downTube.downTubeHeadJoint, headBottom, headTop) < 1e-9);
+    assert.ok(Math.abs(topJointFromBottom / headTubeLength - ALL_ROUND_TOP_TUBE_HEAD_JOINT_RATIO) < 1e-9);
+    assert.ok(Math.abs(downJointFromBottom / headTubeLength - ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO) < 1e-9);
+    assert.ok(topJointFromBottom > downJointFromBottom);
+    assert.ok(topJointFromBottom < headTubeLength);
+    assert.ok(downJointFromBottom > 0);
+    assert.deepEqual(renderData.anchors, originalAnchors);
+    assert.deepEqual(renderData.frame, originalFrame);
+    assert.equal(renderData.geometry.stack, stack);
+    assert.equal(renderData.geometry.reach, reach);
+  }
+});
+
+test("Figma Endurance maps only from its exact top-level template and complete standard anchors", () => {
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.source, "Figma / FrameTemplate_Endurance｜耐力架 / 1:6");
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.templateNodeId, "1:6");
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.frameNodeId, "1:823");
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.anchorsNodeId, "1:846");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameHeadTube.nodeId, "2:885");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameTopTube.nodeId, "2:886");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameDownTube.nodeId, "2:895");
@@ -1655,7 +2254,440 @@ test("Figma endurance frame uses the new semantic split nodes", () => {
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameSeatstay.nodeId, "2:922");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameChainstay.nodeId, "2:931");
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frameBottomBracket.nodeId, "2:902");
-  assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frame, undefined);
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.frame.nodeId, "1:823");
+  assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.cockpit.nodeId, "1:845");
+  for (const anchor of [
+    "bottomBracket", "rearAxle", "frontAxle", "headTubeTop", "headTubeBottom",
+    "seatTubeTop", "topTubeSeatJoint", "topTubeHeadJoint", "downTubeHeadJoint",
+    "seatStayLowConnection", "seatStayMidConnection", "seatStayHighConnection",
+    "saddleAnchor", "handlebarAnchor", "stemToHandlebarJoint",
+    "stemToSpacerJoint", "spacerToHeadTubeJoint",
+  ]) assert.ok(FIGMA_ENDURANCE_TEMPLATE.anchors[anchor], `missing Endurance anchor ${anchor}`);
+  assert.deepEqual(Object.keys(FIGMA_ENDURANCE_TEMPLATE.anchorNodes), [
+    "BB_Center", "RearAxle", "FrontAxle", "HeadTop", "HeadBottom", "SeatCluster",
+    "TopTubeSeatJoint", "TopTubeHeadJoint", "DownTubeHeadJoint", "SeatStayJoint_Low",
+    "SeatStayJoint_Mid", "SeatStayJoint_High", "SaddleAnchor", "HoodContact",
+    "StemToHandlebarJoint", "StemToSpacerJoint", "SpacerToHeadTubeJoint",
+  ]);
+});
+
+test("Figma All-Round maps its complete independent Frame and standard Anchor set", () => {
+  const seatTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/allRound/frame-seat-tube.svg", import.meta.url),
+    "utf8",
+  );
+  const bottomBracketSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/allRound/frame-bottom-bracket.svg", import.meta.url),
+    "utf8",
+  );
+  const forkVisualSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/allRound/fork.svg", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.source, "Figma / FrameTemplate_AllRound｜综合架 / 32:1204");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.templateNodeId, "32:1204");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.frameNodeId, "32:1246");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.anchorsNodeId, "32:1412");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameTopTube.nodeId, "32:1257");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameDownTube.nodeId, "32:1252");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameSeatTube.nodeId, "32:1270");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameBottomBracket.nodeId, "32:1272");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.fork.nodeId, "32:1243");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameHeadTube.nodeId, "32:1260");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameChainstay.nodeId, "32:1263");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.frameSeatstay.nodeId, "32:1268");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.seatpost.nodeId, "32:1218");
+  assert.equal(FIGMA_ALL_ROUND_TEMPLATE.layers.cockpit.nodeId, "32:1222");
+  for (const anchor of [
+    "bottomBracket", "rearAxle", "frontAxle", "headTubeTop", "headTubeBottom",
+    "seatTubeTop", "topTubeSeatJoint", "topTubeHeadJoint", "downTubeHeadJoint",
+    "seatStayLowConnection", "seatStayMidConnection", "seatStayHighConnection",
+    "saddleAnchor", "handlebarAnchor", "stemToHandlebarJoint",
+    "stemToSpacerJoint", "spacerToHeadTubeJoint",
+  ]) assert.ok(FIGMA_ALL_ROUND_TEMPLATE.anchors[anchor], `missing All-Round anchor ${anchor}`);
+  assert.deepEqual(Object.keys(FIGMA_ALL_ROUND_TEMPLATE.anchorNodes), [
+    "BB_Center", "RearAxle", "FrontAxle", "HeadTop", "HeadBottom", "SeatCluster",
+    "TopTubeSeatJoint", "TopTubeHeadJoint", "DownTubeHeadJoint", "SeatStayJoint_Low",
+    "SeatStayJoint_Mid", "SeatStayJoint_High", "SaddleAnchor", "HoodContact",
+    "StemToHandlebarJoint", "StemToSpacerJoint", "SpacerToHeadTubeJoint",
+  ]);
+  assert.deepEqual(resolveAllRoundAssetAnchor("forkAxle"), { x: 1318, y: 732 });
+  assert.match(seatTubeSource, /M232\.625 80\.9342/);
+  assert.match(bottomBracketSource, /M52\.2192 12\.7002/);
+  assert.match(forkVisualSource, /M28\.5222 1\.09769/);
+  assert.match(forkVisualSource, /cx="128" cy="262"[^>]*fill="#878787"/);
+  assert.match(enduranceTemplateSource, /seatTube: usesProgrammaticRoadTubes \? null : colorizedSvgAsset\(frameSeatTubeSource/);
+  assert.doesNotMatch(enduranceTemplateSource, /allRoundFrameSeatTubeSource/);
+  assert.match(enduranceTemplateSource, /isAllRound \? allRoundFrameBottomBracketSource : frameBottomBracketSource/);
+  assert.match(enduranceTemplateSource, /isAero \? aeroForkSource : \(isAllRound \? allRoundForkSource : forkSource\)/);
+});
+
+test("Aero V1 Stable maps the frozen standard-topology template and preserves Geometry", () => {
+  const standardAeroAssets = [
+    "frame-bottom-bracket.svg",
+    "frame-seat-tube.svg",
+    "frame-chainstay.svg",
+    "frame-seatstay.svg",
+    "frame-head-tube.svg",
+    "frame-top-tube.svg",
+    "frame-down-tube.svg",
+    "fork.svg",
+    "seatpost.svg",
+  ];
+  for (const file of standardAeroAssets) {
+    assert.ok(readFileSync(new URL(`../src/assets/bikeTemplates/aero/${file}`, import.meta.url), "utf8").includes("<svg"));
+  }
+
+  const legacyAssets = [
+    "frame-seat-tube-upper-stretch.svg",
+    "frame-seat-tube-lower-fixed.svg",
+  ];
+  for (const file of legacyAssets) {
+    assert.ok(readFileSync(new URL(`../src/assets/bikeTemplates/aero/${file}`, import.meta.url), "utf8").includes("<svg"));
+  }
+
+  const aeroBottomBracketSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/aero/frame-bottom-bracket.svg", import.meta.url),
+    "utf8",
+  );
+  const aeroSeatTubeSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/aero/frame-seat-tube.svg", import.meta.url),
+    "utf8",
+  );
+  const aeroSeatpostSource = readFileSync(
+    new URL("../src/assets/bikeTemplates/aero/seatpost.svg", import.meta.url),
+    "utf8",
+  );
+  assert.match(aeroBottomBracketSource, /width="113\.192"[^>]*height="88\.8519"/);
+  assert.match(aeroBottomBracketSource, /M52\.2192 12\.7002/);
+  assert.match(aeroSeatTubeSource, /id="SeatTube/);
+  assert.match(aeroSeatpostSource, /width="26\.4275" height="237\.477" rx="13\.2137"/);
+  assert.match(aeroSeatpostSource, /rotate\(-17\.2128/);
+
+  assert.equal(FIGMA_AERO_TEMPLATE.source, "Figma / FrameTemplate_Aero｜破风架 / 163:6897");
+  assert.equal(FIGMA_AERO_TEMPLATE.templateNodeId, "163:6897");
+  assert.equal(FIGMA_AERO_TEMPLATE.frameNodeId, "163:6913");
+  assert.equal(FIGMA_AERO_TEMPLATE.anchorsNodeId, "163:7092");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameBottomBracket.nodeId, "163:6959");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameSeatTube.nodeId, "163:6957");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameSeatstay.nodeId, "163:6955");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameChainstay.nodeId, "163:6950");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameTopTube.nodeId, "163:8303");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameDownTube.nodeId, "163:8314");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameHeadTube.nodeId, "163:8311");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.fork.nodeId, "163:8307");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.seatpost.nodeId, "163:6935");
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.cockpit.nodeId, "163:6914");
+  assert.deepEqual(Object.keys(FIGMA_AERO_TEMPLATE.anchorNodes), [
+    "BB_Center", "RearAxle", "FrontAxle", "HeadTop", "HeadBottom", "SeatCluster",
+    "TopTubeSeatJoint", "TopTubeHeadJoint", "DownTubeHeadJoint", "SeatStayJoint_Aero",
+    "SaddleAnchor", "HoodContact", "StemToHandlebarJoint", "StemToSpacerJoint",
+    "SpacerToHeadTubeJoint",
+  ]);
+  for (const deprecatedKey of [
+    "seatTubeLowerJoint",
+    "seatTubeToBBJoint",
+    "rearWheelCutoutReference",
+    "bbFrontJoint",
+    "bbRearJoint",
+  ]) {
+    assert.equal(FIGMA_AERO_TEMPLATE.anchors[deprecatedKey], undefined);
+  }
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameSeatTubeUpperStretch, undefined);
+  assert.equal(FIGMA_AERO_TEMPLATE.layers.frameSeatTubeLowerFixed, undefined);
+  assert.deepEqual(resolveAeroAssetAnchor("forkAxle"), { x: 1318, y: 732 });
+  assert.ok(Math.abs(AERO_VISUAL_CONFIG.topTubeCenterlineSlope) < 0.1);
+
+  const figmaShapeScale = RENDERED_WHEEL_DIAMETER_PX / FIGMA_ENDURANCE_TEMPLATE.layers.rearWheel.width;
+  const validatedSizes = [];
+  for (const sizeData of presetExperienceCatalog.erone.sizes) {
+    const geometry = {
+      ...ENDURANCE_VISUAL_BASE_GEOMETRY,
+      stack: sizeData.stackMm,
+      reach: sizeData.reachMm,
+      seatTube: sizeData.seatTubeLengthMm,
+      effectiveTopTube: sizeData.effectiveTopTubeMm,
+      seatAngle: sizeData.seatTubeAngleDeg,
+      headTube: sizeData.headTubeLengthMm,
+      headAngle: sizeData.headTubeAngleDeg,
+      chainstay: sizeData.chainstayMm,
+      wheelbase: sizeData.wheelbaseMm,
+      bbDrop: sizeData.bbDropMm,
+      forkRake: sizeData.forkOffsetMm,
+    };
+    const renderData = buildBikeGeometry(geometry, defaultFit);
+    const originalGeometry = structuredClone(renderData.geometry);
+    const originalFrame = structuredClone(renderData.frame);
+    const originalAnchors = structuredClone(renderData.anchors);
+    const project = createProjector();
+    const bottomBracket = project(renderData.anchors.bottomBracket);
+    const rearAxle = project(renderData.anchors.rearAxle);
+    const seatCluster = project(renderData.anchors.seatTubeTop);
+    const headTop = project(renderData.anchors.headTubeTop);
+    const headBottom = project(renderData.anchors.headTubeBottom);
+    const visual = getAeroVisualAnchors({
+      bottomBracket,
+      rearAxle,
+      seatCluster,
+      headTop,
+      headBottom,
+    });
+    const headTubeMatrix = orientedSegmentTransform(
+      FIGMA_AERO_TEMPLATE.anchors.headTop,
+      FIGMA_AERO_TEMPLATE.anchors.headBottom,
+      headTop,
+      headBottom,
+      figmaShapeScale,
+    );
+    const sourceHeadDirection = {
+      x: FIGMA_AERO_TEMPLATE.anchors.headTop.x - FIGMA_AERO_TEMPLATE.anchors.headBottom.x,
+      y: FIGMA_AERO_TEMPLATE.anchors.headTop.y - FIGMA_AERO_TEMPLATE.anchors.headBottom.y,
+    };
+    const sourceHeadLength = Math.hypot(sourceHeadDirection.x, sourceHeadDirection.y) || 1;
+    const sourceHeadNormal = {
+      x: -sourceHeadDirection.y / sourceHeadLength,
+      y: sourceHeadDirection.x / sourceHeadLength,
+    };
+    const mappedHeadNormal = {
+      x: (headTubeMatrix.a * sourceHeadNormal.x + headTubeMatrix.c * sourceHeadNormal.y)
+        * AERO_VISUAL_CONFIG.headTubeHalfWidthSourcePx,
+      y: (headTubeMatrix.b * sourceHeadNormal.x + headTubeMatrix.d * sourceHeadNormal.y)
+        * AERO_VISUAL_CONFIG.headTubeHalfWidthSourcePx,
+    };
+    const headTubeHalfWidthPx = Math.hypot(mappedHeadNormal.x, mappedHeadNormal.y);
+    const headTubeShape = getAllRoundSeatTubeShape({
+      bottomBracket: headBottom,
+      seatTubeTop: headTop,
+      towardPoint: visual.topTubeSeatJoint,
+      topHalfWidthPx: headTubeHalfWidthPx,
+      bottomHalfWidthPx: headTubeHalfWidthPx,
+    });
+    const fittedTopTubeJoints = fitTopTubeJointsToHeadTubeBoundary({
+      bottomBracket,
+      seatCluster,
+      headBottom,
+      headTop,
+      topTubeSeatJoint: visual.topTubeSeatJoint,
+      topTubeHeadJoint: visual.topTubeHeadJoint,
+      headTubeBoundaryStart: headTubeShape.headwardBottom,
+      headTubeBoundaryEnd: headTubeShape.headwardTop,
+      topTubeSeatHalfWidthPx: AERO_VISUAL_CONFIG.topTubeSeatHalfWidthSourcePx * figmaShapeScale,
+      topTubeHeadHalfWidthPx: AERO_VISUAL_CONFIG.topTubeHeadHalfWidthSourcePx * figmaShapeScale,
+      headTubeEndInsetPx: AERO_VISUAL_CONFIG.headTubeJunctionOverlapPx,
+    });
+    const seatTubeVisualTop = getAeroSeatTubeVisualTop({
+      bottomBracket,
+      geometrySeatTubeTop: seatCluster,
+      topTubeSeatJoint: fittedTopTubeJoints.topTubeSeatJoint,
+    });
+    const seatTubeShape = getAllRoundSeatTubeShape({
+      bottomBracket,
+      seatTubeTop: seatTubeVisualTop.point,
+      towardPoint: fittedTopTubeJoints.topTubeHeadJoint,
+      topHalfWidthPx: AERO_VISUAL_CONFIG.seatTubeTopHalfWidthSourcePx * figmaShapeScale,
+      bottomHalfWidthPx: AERO_VISUAL_CONFIG.seatTubeBottomHalfWidthSourcePx * figmaShapeScale,
+    });
+    const topTubeShape = getAllRoundTopTubeShape({
+      bottomBracket,
+      seatCluster,
+      seatTubeBoundaryStart: seatTubeShape.headwardBottom,
+      seatTubeBoundaryEnd: seatTubeShape.headwardTop,
+      headBottom,
+      headTop,
+      topTubeSeatJoint: fittedTopTubeJoints.topTubeSeatJoint,
+      topTubeHeadJoint: fittedTopTubeJoints.topTubeHeadJoint,
+      headTubeHalfWidthPx,
+      headTubeBoundaryStart: headTubeShape.headwardBottom,
+      headTubeBoundaryEnd: headTubeShape.headwardTop,
+      headTubeSeamOverlapPx: AERO_VISUAL_CONFIG.headTubeJunctionOverlapPx,
+      topTubeSeatHalfWidthPx: AERO_VISUAL_CONFIG.topTubeSeatHalfWidthSourcePx * figmaShapeScale,
+      topTubeHeadHalfWidthPx: AERO_VISUAL_CONFIG.topTubeHeadHalfWidthSourcePx * figmaShapeScale,
+    });
+    const downTubeShape = getAeroDownTubeShape({
+      bottomBracket,
+      downTubeHeadJoint: visual.downTubeHeadJoint,
+      headBottom,
+      headTop,
+      headTubeSeatwardBoundaryStart: headTubeShape.headwardBottom,
+      headTubeSeatwardBoundaryEnd: headTubeShape.headwardTop,
+      bbHalfWidthPx: AERO_VISUAL_CONFIG.downTubeBbHalfWidthSourcePx * figmaShapeScale,
+      headHalfWidthPx: AERO_VISUAL_CONFIG.downTubeHeadHalfWidthSourcePx * figmaShapeScale,
+      maximumBoundaryRatio: Math.min(
+        fittedTopTubeJoints.upperBoundaryRatio,
+        fittedTopTubeJoints.lowerBoundaryRatio,
+      ) - AERO_VISUAL_CONFIG.headTubeJunctionOverlapPx / Math.hypot(
+        headTubeShape.headwardTop.x - headTubeShape.headwardBottom.x,
+        headTubeShape.headwardTop.y - headTubeShape.headwardBottom.y,
+      ),
+    });
+
+    assert.deepEqual(visual.seatTubeTop, seatCluster, `${sizeData.size} uses the Geometry SeatCluster as the single SeatTube top`);
+    assert.ok(pointLineDistance(seatTubeVisualTop.point, bottomBracket, seatCluster) < 1e-9);
+    assert.ok(
+      seatTubeVisualTop.visualLength >= seatTubeVisualTop.geometryLength,
+      `${sizeData.size} never shortens the official Geometry SeatTube shell`,
+    );
+    assert.ok(
+      seatTubeVisualTop.jointOverlapPx >= AERO_VISUAL_CONFIG.seatTubeTopJointOverlapPx - 1e-9,
+      `${sizeData.size} SeatTube shell covers TopTubeSeatJoint with the seam overlap`,
+    );
+    assert.ok(pointLineDistance(visual.seatStayJoint, bottomBracket, seatCluster) < 1e-9);
+    assert.ok(pointLineDistance(visual.topTubeSeatJoint, bottomBracket, seatCluster) < 1e-9);
+    assert.ok(pointLineDistance(visual.topTubeHeadJoint, headBottom, headTop) < 1e-9);
+    assert.ok(pointLineDistance(fittedTopTubeJoints.topTubeSeatJoint, bottomBracket, seatCluster) < 1e-9);
+    assert.ok(pointLineDistance(fittedTopTubeJoints.topTubeHeadJoint, headBottom, headTop) < 1e-9);
+    const headBoundaryLength = Math.hypot(
+      headTubeShape.headwardTop.x - headTubeShape.headwardBottom.x,
+      headTubeShape.headwardTop.y - headTubeShape.headwardBottom.y,
+    );
+    const maximumHeadBoundaryRatio = 1 - AERO_VISUAL_CONFIG.headTubeJunctionOverlapPx / headBoundaryLength;
+    assert.ok(fittedTopTubeJoints.upperBoundaryRatio <= maximumHeadBoundaryRatio + 1e-9, `${sizeData.size} upper TopTube edge remains inside the HeadTop cap`);
+    assert.ok(fittedTopTubeJoints.lowerBoundaryRatio <= maximumHeadBoundaryRatio + 1e-9, `${sizeData.size} lower TopTube edge remains inside the HeadTop cap`);
+    assert.ok(fittedTopTubeJoints.upperBoundaryRatio >= -1e-9, `${sizeData.size} upper TopTube edge remains above HeadBottom`);
+    assert.ok(fittedTopTubeJoints.lowerBoundaryRatio >= -1e-9, `${sizeData.size} lower TopTube edge remains above HeadBottom`);
+    assert.ok(pointLineDistance(visual.downTubeHeadJoint, headBottom, headTop) < 1e-9);
+    for (const point of topTubeShape.points) {
+      assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y), `${sizeData.size} has a finite Aero TopTube polygon`);
+    }
+    assert.ok(pointLineDistance(topTubeShape.upperSeatIntersection, seatTubeShape.headwardBottom, seatTubeShape.headwardTop) < 1e-9);
+    assert.ok(pointLineDistance(topTubeShape.lowerSeatIntersection, seatTubeShape.headwardBottom, seatTubeShape.headwardTop) < 1e-9);
+    assert.ok(pointLineDistance(
+      topTubeShape.upperHeadIntersection,
+      topTubeShape.headTubeIntersectionBoundaryStart,
+      topTubeShape.headTubeIntersectionBoundaryEnd,
+    ) < 1e-9, `${sizeData.size} TopTube upper edge ends on the shared inset HeadTube boundary`);
+    assert.ok(pointLineDistance(
+      topTubeShape.lowerHeadIntersection,
+      topTubeShape.headTubeIntersectionBoundaryStart,
+      topTubeShape.headTubeIntersectionBoundaryEnd,
+    ) < 1e-9, `${sizeData.size} TopTube lower edge ends on the shared inset HeadTube boundary`);
+    assert.equal(downTubeShape.points.length, 4);
+    for (const point of downTubeShape.points) {
+      assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y), `${sizeData.size} has a finite Aero DownTube polygon`);
+    }
+    assert.ok(pointLineDistance(
+      downTubeShape.upperBoundaryIntersection,
+      headTubeShape.headwardBottom,
+      headTubeShape.headwardTop,
+    ) < 1e-9, `${sizeData.size} DownTube upper edge intersects the actual HeadTube seatward edge`);
+    assert.ok(pointLineDistance(
+      downTubeShape.lowerBoundaryIntersection,
+      headTubeShape.headwardBottom,
+      headTubeShape.headwardTop,
+    ) < 1e-9, `${sizeData.size} DownTube lower edge intersects the actual HeadTube seatward edge`);
+    assert.ok(pointLineDistance(
+      downTubeShape.upperHeadIntersection,
+      downTubeShape.insetBoundaryStart,
+      downTubeShape.insetBoundaryEnd,
+    ) < 1e-9, `${sizeData.size} DownTube upper edge enters the shared inset boundary`);
+    assert.ok(pointLineDistance(
+      downTubeShape.lowerHeadIntersection,
+      downTubeShape.insetBoundaryStart,
+      downTubeShape.insetBoundaryEnd,
+    ) < 1e-9, `${sizeData.size} DownTube lower edge enters the shared inset boundary`);
+    assert.ok(
+      downTubeShape.upperBoundaryRatio >= downTubeShape.minimumBoundaryRatio - 1e-8,
+      `${sizeData.size} upper=${downTubeShape.upperBoundaryRatio} min=${downTubeShape.minimumBoundaryRatio}`,
+    );
+    assert.ok(
+      downTubeShape.lowerBoundaryRatio >= downTubeShape.minimumBoundaryRatio - 1e-8,
+      `${sizeData.size} lower=${downTubeShape.lowerBoundaryRatio} min=${downTubeShape.minimumBoundaryRatio}`,
+    );
+    assert.ok(
+      Math.max(downTubeShape.upperBoundaryRatio, downTubeShape.lowerBoundaryRatio)
+        <= downTubeShape.maximumBoundaryRatio + 1e-8,
+      `${sizeData.size} keeps separate TopTube and DownTube junctions: down=${Math.max(downTubeShape.upperBoundaryRatio, downTubeShape.lowerBoundaryRatio)} top=${Math.min(fittedTopTubeJoints.upperBoundaryRatio, fittedTopTubeJoints.lowerBoundaryRatio)}`,
+    );
+    const headBottomMidpoint = {
+      x: (headTubeShape.headwardBottom.x + headTubeShape.rearwardBottom.x) / 2,
+      y: (headTubeShape.headwardBottom.y + headTubeShape.rearwardBottom.y) / 2,
+    };
+    const headTopMidpoint = {
+      x: (headTubeShape.headwardTop.x + headTubeShape.rearwardTop.x) / 2,
+      y: (headTubeShape.headwardTop.y + headTubeShape.rearwardTop.y) / 2,
+    };
+    assert.ok(Math.hypot(headBottomMidpoint.x - headBottom.x, headBottomMidpoint.y - headBottom.y) < 1e-9);
+    assert.ok(Math.hypot(headTopMidpoint.x - headTop.x, headTopMidpoint.y - headTop.y) < 1e-9);
+
+    const seatstayMatrix = orientedSegmentTransform(
+      FIGMA_AERO_TEMPLATE.anchors.rearAxle,
+      FIGMA_AERO_TEMPLATE.anchors.seatStayAeroConnection,
+      rearAxle,
+      visual.seatStayJoint,
+      figmaShapeScale,
+    );
+    const chainstayMatrix = orientedSegmentTransform(
+      FIGMA_AERO_TEMPLATE.anchors.rearAxle,
+      FIGMA_AERO_TEMPLATE.anchors.bottomBracket,
+      rearAxle,
+      bottomBracket,
+      figmaShapeScale,
+    );
+    const bbMatrix = uniformAroundPoint(
+      FIGMA_AERO_TEMPLATE.anchors.bottomBracket,
+      bottomBracket,
+      figmaShapeScale,
+    );
+    assert.ok(Math.hypot(
+      applyMatrix(seatstayMatrix, FIGMA_AERO_TEMPLATE.anchors.seatStayAeroConnection).x - visual.seatStayJoint.x,
+      applyMatrix(seatstayMatrix, FIGMA_AERO_TEMPLATE.anchors.seatStayAeroConnection).y - visual.seatStayJoint.y,
+    ) < 1e-9, `${sizeData.size} SeatStay ends at fixed SeatStayJoint_Aero`);
+    assert.ok(Math.hypot(
+      applyMatrix(chainstayMatrix, FIGMA_AERO_TEMPLATE.anchors.bottomBracket).x - bottomBracket.x,
+      applyMatrix(chainstayMatrix, FIGMA_AERO_TEMPLATE.anchors.bottomBracket).y - bottomBracket.y,
+    ) < 1e-9, `${sizeData.size} ChainStay reaches BB`);
+    assert.ok(Math.hypot(
+      applyMatrix(bbMatrix, FIGMA_AERO_TEMPLATE.anchors.bottomBracket).x - bottomBracket.x,
+      applyMatrix(bbMatrix, FIGMA_AERO_TEMPLATE.anchors.bottomBracket).y - bottomBracket.y,
+    ) < 1e-9, `${sizeData.size} rigid BB stays centered on BB_Center`);
+    assert.ok(Math.abs(Math.hypot(bbMatrix.a, bbMatrix.b) - Math.hypot(bbMatrix.c, bbMatrix.d)) < 1e-12);
+
+    const seatpostAnchors = getSeatpostVisualAnchors({
+      bottomBracket,
+      socketAnchor: seatCluster,
+      saddleClampReference: project(renderData.anchors.saddleClampAnchor),
+      saddleVisualReference: project(renderData.anchors.saddleVisualAnchor),
+      saddleContactReference: project(renderData.anchors.saddleContactPoint),
+    });
+    const seatpostMatrix = orientedSegmentTransform(
+      resolveAeroAssetAnchor("seatpostBottom"),
+      resolveAeroAssetAnchor("seatpostTop"),
+      seatpostAnchors.seatpostBottom,
+      seatpostAnchors.seatpostTop,
+      figmaShapeScale,
+    );
+    assert.ok(Math.hypot(
+      applyMatrix(seatpostMatrix, resolveAeroAssetAnchor("seatpostBottom")).x - seatCluster.x,
+      applyMatrix(seatpostMatrix, resolveAeroAssetAnchor("seatpostBottom")).y - seatCluster.y,
+    ) < 1e-9, `${sizeData.size} Aero Seatpost begins at SeatCluster`);
+
+    assert.deepEqual(renderData.geometry, originalGeometry);
+    assert.deepEqual(renderData.frame, originalFrame);
+    assert.deepEqual(renderData.anchors, originalAnchors);
+    assert.equal(renderData.geometry.stack, sizeData.stackMm);
+    assert.equal(renderData.geometry.reach, sizeData.reachMm);
+    assert.equal(renderData.geometry.wheelbase, sizeData.wheelbaseMm);
+    validatedSizes.push(sizeData.size);
+  }
+
+  assert.deepEqual(validatedSizes, ["430", "460", "490", "520", "550", "584"]);
+  assert.match(enduranceTemplateSource, /data-aero-runtime=\{isAero \? "v1-stable-standard-topology"/);
+  assert.match(enduranceTemplateSource, /data-render-layer="seat-tube-programmatic-aero"/);
+  assert.match(enduranceTemplateSource, /data-render-layer="top-tube-programmatic-aero"/);
+  assert.match(enduranceTemplateSource, /data-render-layer="head-tube-programmatic-aero"/);
+  assert.match(enduranceTemplateSource, /data-render-layer="down-tube-programmatic-aero"/);
+  assert.match(enduranceTemplateSource, /getAeroSeatTubeVisualTop/);
+  assert.match(enduranceTemplateSource, /getAeroDownTubeShape/);
+  assert.match(enduranceTemplateSource, /data-aero-seat-tube-joint-overlap-px/);
+  assert.doesNotMatch(enduranceTemplateSource, /aeroFrameHeadTubeSource|frameAssets\.aeroHeadTube|aeroFrameDownTubeSource/);
+  assert.match(enduranceTemplateSource, /rigid-uniform-from-bb-center/);
+  assert.match(enduranceTemplateSource, /aeroSourceAnchors\.seatStayAeroConnection/);
+  assert.match(enduranceTemplateSource, /activeSeatpostAsset = isAero \? aeroSeatpost/);
+  assert.doesNotMatch(enduranceTemplateSource, /SeatTube_UpperStretch|SeatTube_LowerFixed|RearWheelCutout/);
+  assert.doesNotMatch(enduranceTemplateSource, /seatTubeLowerJoint|seatTubeToBBJoint|aeroSeatAxis|bbFrontJoint|bbRearJoint/);
+  assert.match(roadBikeVisualSource, /preset\.id === "aero"/);
+  assert.equal((roadBikeVisualSource.match(/<RoadFrameRenderer/g) ?? []).length, 1);
 });
 
 test("top and down tube assets preserve Figma connection-completion layers above their main paths", () => {
@@ -1679,14 +2711,14 @@ test("top and down tube assets preserve Figma connection-completion layers above
   assert.equal((downTubeSource.match(/fill="black"/g) ?? []).length, 4);
   assert.doesNotMatch(`${topTubeSource}${downTubeSource}`, /<rect|<filter|border-radius/);
   assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameTopTubeSource, "black", components\.frameColor\)/);
-  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(frameDownTubeSource, "black", components\.frameColor\)/);
+  assert.match(enduranceTemplateSource, /colorizedSvgAsset\(downTubeSource, "black", components\.frameColor\)/);
 });
 
 test("Fork visual leaves a 6px axial head gap while keeping FrontAxle exact", () => {
   assert.match(enduranceTemplateSource, /const FORK_HEAD_GAP_PX = 6/);
   assert.match(enduranceTemplateSource, /forkAxisDelta\.x \/ forkAxisLength \* FORK_HEAD_GAP_PX/);
   assert.match(enduranceTemplateSource, /forkAxisDelta\.y \/ forkAxisLength \* FORK_HEAD_GAP_PX/);
-  assert.match(enduranceTemplateSource, /assetAnchors\.forkTop,[\s\S]*assetAnchors\.forkAxle,[\s\S]*forkVisualTop,[\s\S]*projected\.frontAxle/);
+  assert.match(enduranceTemplateSource, /activeForkAssetAnchors\.forkTop,[\s\S]*activeForkAssetAnchors\.forkAxle,[\s\S]*forkVisualTop,[\s\S]*projected\.frontAxle/);
   assert.match(enduranceTemplateSource, /data-fork-head-gap-px=\{FORK_HEAD_GAP_PX\}/);
   assert.match(enduranceTemplateSource, /data-fork-axle-error-px=\{forkAxleErrorPx\.toFixed\(9\)\}/);
 });
@@ -1886,13 +2918,13 @@ test("Figma component connection anchors remain exact for all seven Domane sizes
   }
 });
 
-test("Figma cockpit visuals follow the physical Spacer → Stem → Handlebar chain", () => {
-  assert.match(enduranceTemplateSource, /assetAnchors\.spacerHeadtubeAnchor,[\s\S]*assetAnchors\.spacerVisualAxisEnd,[\s\S]*projected\.spacerHeadtubeAnchor,[\s\S]*projected\.spacerTop/);
+test("Figma cockpit visuals follow the active template's physical Spacer → Stem → Handlebar chain", () => {
+  assert.match(enduranceTemplateSource, /activeCockpitAssetAnchors\.spacerHeadtubeAnchor,[\s\S]*activeCockpitAssetAnchors\.spacerVisualAxisEnd,[\s\S]*projected\.spacerHeadtubeAnchor,[\s\S]*projected\.spacerTop/);
   assert.match(enduranceTemplateSource, /<ProgrammaticStem start=\{projected\.stemSpacerAnchor\} end=\{projected\.stemHandlebarAnchor\} \/>/);
   assert.match(enduranceTemplateSource, /<rect[\s\S]*x=\{start\.x - PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}[\s\S]*width=\{length \+ PROGRAMMATIC_STEM_LEFT_OVERLAP_PX\}[\s\S]*rx=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}[\s\S]*ry=\{PROGRAMMATIC_STEM_CORNER_RADIUS_PX\}/);
   assert.doesNotMatch(enduranceTemplateSource, /strokeLinecap="round"|programmatic-capsule/);
   assert.doesNotMatch(enduranceTemplateSource, /stem\.svg|stemMatrix|layers\.stem|assetAnchors\.stem/);
-  assert.match(enduranceTemplateSource, /const handlebarMatrix = uniformAroundPoint\([\s\S]*assetAnchors\.handlebarClampAnchor,[\s\S]*projected\.handlebarClampAnchor,[\s\S]*figmaShapeScale/);
+  assert.match(enduranceTemplateSource, /const handlebarMatrix = uniformAroundPoint\([\s\S]*activeCockpitAssetAnchors\.handlebarClampAnchor,[\s\S]*projected\.handlebarClampAnchor,[\s\S]*figmaShapeScale/);
   assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.layers.handlebarHood, { nodeId: "8:9679", x: 1240, y: 289, width: 136.383102, height: 127.999939 });
   assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.layers.handlebarTape, { nodeId: "8:9665", x: 1221, y: 287, width: 164, height: 162 });
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.layers.handlebar, undefined);
@@ -1900,12 +2932,12 @@ test("Figma cockpit visuals follow the physical Spacer → Stem → Handlebar ch
   assert.match(handlebarHoodSource, /width="136\.383" height="128"[\s\S]*fill="black"/);
   assert.match(handlebarTapeSource, /width="164" height="162"[\s\S]*fill="#D9D9D9"/);
   assert.match(enduranceTemplateSource, /data-handlebar-position-binding="shared-handlebar-matrix"/);
-  assert.match(enduranceTemplateSource, /asset=\{handlebarHood\} layer=\{layers\.handlebarHood\} transform=\{handlebarMatrix\}[\s\S]*asset=\{handlebarTapeAsset\} layer=\{layers\.handlebarTape\} transform=\{handlebarMatrix\}/);
-  assert.ok(enduranceTemplateSource.indexOf("asset={handlebarHood}") < enduranceTemplateSource.indexOf("asset={handlebarTapeAsset}"));
+  assert.match(enduranceTemplateSource, /asset=\{activeHandlebarHoodAsset\} layer=\{activeHandlebarHoodLayer\} transform=\{handlebarMatrix\}[\s\S]*asset=\{handlebarTapeAsset\} layer=\{activeHandlebarTapeLayer\} transform=\{handlebarMatrix\}/);
+  assert.ok(enduranceTemplateSource.indexOf("asset={activeHandlebarHoodAsset}") < enduranceTemplateSource.indexOf("asset={handlebarTapeAsset}"));
   assert.doesNotMatch(enduranceTemplateSource, /asset=\{handlebar\}|layers\.handlebar\b/);
   assert.doesNotMatch(enduranceTemplateSource, /assetAnchors\.(stemBase|stemClamp|handlebarClamp)\b/);
-  assert.match(enduranceTemplateSource, /totalSpacerStackHeight > 0[\s\S]*asset=\{spacer\}/);
-  assert.match(enduranceTemplateSource, /const handlebarContactPoint = applyMatrix\(handlebarMatrix, sourceAnchors\.handlebarAnchor\)/);
+  assert.match(enduranceTemplateSource, /totalSpacerStackHeight > 0[\s\S]*asset=\{activeSpacerAsset\}/);
+  assert.match(enduranceTemplateSource, /const handlebarContactPoint = applyMatrix\(handlebarMatrix, activeSourceAnchors\.handlebarAnchor\)/);
   assert.match(enduranceTemplateSource, /<HandlebarContactMarker point=\{handlebarContactPoint\} \/>/);
   assert.doesNotMatch(enduranceTemplateSource, /showFigmaAnchors && <HandlebarContactMarker/);
   assert.ok(enduranceTemplateSource.indexOf('renderLayer="drive-crank"') < enduranceTemplateSource.indexOf('data-render-layer="contact-points"'));
@@ -1973,6 +3005,7 @@ test("Spacer height maps the complete Cockpit assembly and Figma hood contact to
 test("Figma Cockpit keeps Spacer and Handlebar resources while Stem is programmatic", () => {
   assert.deepEqual(FIGMA_ENDURANCE_TEMPLATE.layers.spacer, {
     nodeId: "1:282",
+    figmaName: "垫圈",
     x: 1148,
     y: 313,
     width: 127,
@@ -1991,7 +3024,7 @@ test("Figma Cockpit keeps Spacer and Handlebar resources while Stem is programma
   assert.equal(FIGMA_ENDURANCE_TEMPLATE.assetAnchors.stemClamp, undefined);
   assert.match(spacerVisualSource, /width="127" height="106" viewBox="0 0 127 106"/);
   assert.match(spacerVisualSource, /id="Vector 12"/);
-  assert.match(spacerVisualSource, /fill="#4C4C4C"/);
+  assert.match(spacerVisualSource, /fill="#3D3D3D"/);
   assert.match(seatpostVisualSource, /fill="#191919"/);
   assert.match(enduranceTemplateSource, /data-stem-visual-source="programmatic-rounded-rect"/);
   assert.match(enduranceTemplateSource, /fill="#191919"[\s\S]*?data-stem-visual-source="programmatic-rounded-rect"/);

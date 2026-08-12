@@ -1,5 +1,11 @@
 import { GEOMETRY_PARSER_PLAUSIBILITY_RANGES } from "../services/geometryParserSchema.js";
 import { ENDURANCE_VISUAL_BASE_GEOMETRY } from "../data/enduranceGeometry.js";
+import {
+  BIKE_CATEGORIES,
+  DEFAULT_BIKE_CATEGORY,
+  normalizeBikeCategory,
+} from "../config/bikeArchetypes.js";
+import { sortBikeSizes } from "../lib/geometry/sizeSorting.js";
 
 export const GEOMETRY_IMPORT_STATUSES = Object.freeze([
   "analyzing",
@@ -49,7 +55,7 @@ export function createManualGeometryImportDraft() {
     geometryValueSource: "manual",
     brand: "",
     model: "",
-    category: "endurance",
+    category: DEFAULT_BIKE_CATEGORY,
     candidateSizes: { [MANUAL_GEOMETRY_SIZE_PLACEHOLDER]: { ...geometry } },
     sizes: { [MANUAL_GEOMETRY_SIZE_PLACEHOLDER]: { ...geometry } },
     selectedImportSizes: [MANUAL_GEOMETRY_SIZE_PLACEHOLDER],
@@ -72,7 +78,11 @@ export function getSelectedImportSizes(draft) {
     ? draft.selectedImportSizes.map(toSize)
     : [];
   const selected = [...new Set(requested.filter((size) => candidateKeys.includes(size)))];
-  if (selected.length) return selected;
+  const sourceOrder = [...new Set([
+    ...(draft?.detectedSizes ?? []).map(toSize),
+    ...candidateKeys,
+  ])];
+  if (selected.length) return sortBikeSizes(selected, { sourceOrder });
   const selectedSize = toSize(draft?.selectedSize);
   if (candidateKeys.includes(selectedSize)) return [selectedSize];
   return candidateKeys[0] ? [candidateKeys[0]] : [];
@@ -87,7 +97,14 @@ export function scopeGeometryImportWarnings(warnings, selectedImportSizes) {
 
 function applyImportSizeSelection(draft, selectedImportSizes) {
   const candidateSizes = draft?.candidateSizes ?? draft?.sizes ?? {};
-  const selected = selectedImportSizes.filter((size) => candidateSizes[size]);
+  const sourceOrder = [...new Set([
+    ...(draft?.detectedSizes ?? []).map(toSize),
+    ...Object.keys(candidateSizes),
+  ])];
+  const selected = sortBikeSizes(
+    selectedImportSizes.filter((size) => candidateSizes[size]),
+    { sourceOrder },
+  );
   const sizes = Object.fromEntries(selected.map((size) => [size, cloneGeometry(candidateSizes[size])]));
   const allParserWarnings = Array.isArray(draft?.allParserWarnings)
     ? draft.allParserWarnings
@@ -254,6 +271,7 @@ export function getGeometryImportFieldError(field, value) {
 export function validateGeometryImportDraft(draft) {
   const errors = {};
   if (!draft?.brand?.trim()) errors.brand = "请输入品牌名称";
+  if (!BIKE_CATEGORIES.includes(draft?.category)) errors.category = "请选择车架类型";
 
   const sizes = getSelectedImportSizes(draft);
   if (sizes.length === 0) errors.sizes = "未识别到可用尺码";
@@ -404,7 +422,7 @@ export function bikeToGeometryImportDraft(bike) {
     geometryValueSource: bike.importSource?.geometryValueSource ?? "official",
     brand: bike.brand,
     model: bike.model,
-    category: "endurance",
+    category: normalizeBikeCategory(bike.category),
     candidateSizes,
     sizes: Object.fromEntries(selectedImportSizes.map((size) => [size, cloneGeometry(candidateSizes[size])])),
     selectedImportSizes,

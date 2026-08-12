@@ -13,11 +13,12 @@ import {
   WHEEL_RADIUS,
   createProjector,
 } from "../../lib/geometry/frameGeometry.js";
-import { bikeArchetypes } from "../../config/bikeArchetypes.js";
+import { resolveFrameVisualPreset } from "../../config/bikeArchetypes.js";
 import { resolveComponentSetup } from "../../config/bikeComponents.js";
 import { toGeometryFit } from "../../config/fitSetup.js";
 import { getRenderableComponentSetup } from "../../state/dualBikeState.js";
 import { DualBikeControls } from "../comparison/DualBikeControls.jsx";
+import { PresetExperienceControls } from "../preset/PresetExperienceControls.jsx";
 import { Switch } from "../ui/Stepper.jsx";
 import { FullscreenGeometrySummary } from "./FullscreenGeometrySummary.jsx";
 import { RoadBikeVisual } from "./bikeParts/RoadBikeVisual.jsx";
@@ -44,6 +45,7 @@ function useBikeRenderModel(bike) {
 function BikeRenderer({ model, projector, showSkeleton, showFigmaAnchors, motionStopped, opacity, isPrimary, frameOnly }) {
   const { bike, data, componentSetup } = model;
   const sourceId = getBikeVisualSourceId(bike.id);
+  const frameVisualPreset = resolveFrameVisualPreset(bike.category);
   return (
     <g
       className={`bike-layer bike-layer--${isPrimary ? "primary" : "secondary"}`}
@@ -52,7 +54,7 @@ function BikeRenderer({ model, projector, showSkeleton, showFigmaAnchors, motion
       data-bike-opacity={opacity}
     >
       <g id={sourceId} data-bike-visual-source={bike.id}>
-        <RoadBikeVisual data={data} project={projector} preset={bikeArchetypes.endurance} showFigmaAnchors={showFigmaAnchors} showContactPoints={!frameOnly} componentSetup={componentSetup} motionStopped={motionStopped} frameOnly={frameOnly} />
+        <RoadBikeVisual data={data} project={projector} preset={frameVisualPreset} showFigmaAnchors={showFigmaAnchors} showContactPoints={!frameOnly} componentSetup={componentSetup} motionStopped={motionStopped} frameOnly={frameOnly} seatStayStyle={bike.seatStayStyle} />
       </g>
       {showSkeleton && <GeometrySkeleton anchors={data.anchors} cockpit={data.cockpit} project={projector} />}
       {!frameOnly && <ContactPoint point={data.contacts.saddle} project={projector} label="S" kind="saddle" />}
@@ -78,6 +80,9 @@ function GeometryPreviewReference({ point, label, project }) {
 export function BikeVisualizer({
   bikes,
   demoBike,
+  presetExperienceMode = false,
+  presetExperienceBikes = [],
+  activePresetBikeId,
   activeBikeIndex,
   stagePreviewBike,
   frameOnly = false,
@@ -89,6 +94,8 @@ export function BikeVisualizer({
   onCompareEnabledChange,
   onAddBike,
   onManageBike,
+  onPresetBikeChange,
+  onRequestPresetComparison,
   isStageFullscreen,
   onToggleStageFullscreen,
 }) {
@@ -113,7 +120,7 @@ export function BikeVisualizer({
   const primaryModel = renderModelList[safeActiveIndex];
   const secondaryModel = renderModelList[safeActiveIndex === 0 ? 1 : 0];
   const hasRenderablePreview = Boolean(primaryModel);
-  const isComparisonVisible = hasRenderablePreview && bikes.length === 2 && compareEnabled;
+  const isComparisonVisible = !presetExperienceMode && hasRenderablePreview && bikes.length === 2 && compareEnabled;
   const renderModels = isComparisonVisible ? [secondaryModel, primaryModel] : [primaryModel];
   const bike = primaryModel?.bike ?? null;
   const data = primaryModel?.data ?? null;
@@ -170,7 +177,7 @@ export function BikeVisualizer({
   }, [isMotionStopped]);
 
   return (
-    <section className="visualizer" aria-label="Trek Domane 自行车几何可视化">
+    <section className="visualizer" aria-label={bike ? `${bike.brand} ${bike.model} 自行车几何可视化` : "自行车几何可视化"}>
       <div className="visualizer__header">
         {geometryImportMode ? (
           <div className="geometry-preview-heading" aria-label="Geometry Import Mode">
@@ -179,6 +186,13 @@ export function BikeVisualizer({
               ? "仅预览 Frame + Fork · 修改参数后实时更新"
               : "部分几何数据需要确认，预览暂未完全生成。"}</span>
           </div>
+        ) : presetExperienceMode ? (
+          <PresetExperienceControls
+            presets={presetExperienceBikes}
+            activePresetBikeId={activePresetBikeId}
+            onPresetBikeChange={onPresetBikeChange}
+            onRequestComparison={onRequestPresetComparison}
+          />
         ) : (
           <DualBikeControls
             bikes={bikes}
@@ -326,9 +340,9 @@ export function BikeVisualizer({
       </div>
       {!geometryImportMode && (
         <FullscreenGeometrySummary
-          bikes={bikes}
-          activeBikeIndex={activeBikeIndex}
-          compareEnabled={compareEnabled}
+          bikes={presetExperienceMode ? [demoBike] : bikes}
+          activeBikeIndex={presetExperienceMode ? 0 : activeBikeIndex}
+          compareEnabled={presetExperienceMode ? false : compareEnabled}
           visible={isStageFullscreen}
         />
       )}

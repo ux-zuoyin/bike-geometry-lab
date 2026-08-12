@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { updateWheelSelection, updateWheelSelectionLink } from "./config/bikeComponents.js";
 import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersistence.js";
-import { createBikeFromGeometryImport, createComparisonBike, getPersistableBikeSetup, updateBikeSize } from "./state/dualBikeState.js";
+import { createBikeFromGeometryImport, createComparisonBike, createPresetExperiencePack, getPersistableBikeSetup, instantiatePresetExperienceBike, updateBikeSeatStayStyle, updateBikeSize } from "./state/dualBikeState.js";
 import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
 import { analyzeGeometryImage } from "./services/geometryImageAnalyzer.js";
@@ -11,13 +11,18 @@ import { BikeVisualizer } from "./components/visualizer/BikeVisualizer.jsx";
 import { BikeManagementModal } from "./components/comparison/BikeManagementModal.jsx";
 import Prism from "./components/visualizer/Prism.jsx";
 import { WelcomeGate } from "./components/import/WelcomeGate.jsx";
+import { PresetComparisonConfirmModal } from "./components/preset/PresetComparisonConfirmModal.jsx";
 import brandLogo from "./assets/brand/logo_bai.png";
+import { DEFAULT_PRESET_BIKE_ID, PRESET_EXPERIENCE_IDS } from "./data/presetExperience.js";
 
 const GEOMETRY_PREVIEW_COLOR = "#E5E7EB";
 
 export function App() {
   const [initialSetup] = useState(() => readPersistedBikeSetup());
-  const [demoBike] = useState(() => createComparisonBike("demo-preview", initialSetup));
+  const [presetExperienceBikes, setPresetExperienceBikes] = useState(() => createPresetExperiencePack(initialSetup));
+  const [activePresetBikeId, setActivePresetBikeId] = useState(DEFAULT_PRESET_BIKE_ID);
+  const [isPresetExperienceMode, setIsPresetExperienceMode] = useState(false);
+  const [pendingPresetComparisonId, setPendingPresetComparisonId] = useState(null);
   const [bikes, setBikes] = useState([]);
   const [activeBikeIndex, setActiveBikeIndex] = useState(null);
   const [compareEnabled, setCompareEnabled] = useState(false);
@@ -35,7 +40,12 @@ export function App() {
   const analysisRequestId = useRef(0);
 
   const selectedBike = activeBikeIndex == null ? null : bikes[activeBikeIndex] ?? null;
-  const workspaceBike = selectedBike ?? demoBike;
+  const activePresetBike = presetExperienceBikes[activePresetBikeId];
+  const pendingPresetComparisonBike = pendingPresetComparisonId == null
+    ? null
+    : presetExperienceBikes[pendingPresetComparisonId] ?? null;
+  const orderedPresetExperienceBikes = PRESET_EXPERIENCE_IDS.map((id) => presetExperienceBikes[id]);
+  const workspaceBike = selectedBike ?? activePresetBike;
   const isGeometryImportActive = geometryImportStatus !== "ready";
   const importSelectedGeometry = geometryImportDraft?.sizes?.[geometryImportDraft.selectedSize];
   const geometryImportPreviewIssues = getGeometryImportPreviewIssues(importSelectedGeometry);
@@ -48,7 +58,7 @@ export function App() {
     frameColor: GEOMETRY_PREVIEW_COLOR,
     forkColor: GEOMETRY_PREVIEW_COLOR,
   };
-  const showWelcomeGate = bikes.length === 0 && geometryImportStatus === "ready";
+  const showWelcomeGate = bikes.length === 0 && !isPresetExperienceMode && geometryImportStatus === "ready";
 
   useEffect(() => {
     if (!shouldPersistSetup.current || !bikes[0]) return;
@@ -67,20 +77,29 @@ export function App() {
     bikeIndex === index ? (typeof update === "function" ? update(bike) : update) : bike
   )));
   const updateSelectedBike = (update) => {
-    if (activeBikeIndex == null) return;
-    updateBikeAt(activeBikeIndex, update);
+    if (activeBikeIndex != null) {
+      updateBikeAt(activeBikeIndex, update);
+      return;
+    }
+    if (!isPresetExperienceMode) return;
+    setPresetExperienceBikes((current) => {
+      const activeBike = current[activePresetBikeId];
+      const nextBike = typeof update === "function" ? update(activeBike) : update;
+      return { ...current, [activePresetBikeId]: nextBike };
+    });
   };
   const markFirstBikeForPersistence = () => {
     if (activeBikeIndex === 0) shouldPersistSetup.current = true;
   };
   const setFrameSize = (size) => updateSelectedBike((current) => updateBikeSize(current, size));
+  const setSeatStayStyle = (style) => updateSelectedBike((current) => updateBikeSeatStayStyle(current, style));
   const updateFitSetup = (key, value) => {
-    if (!selectedBike) return;
+    if (!selectedBike && !isPresetExperienceMode) return;
     markFirstBikeForPersistence();
     updateSelectedBike((current) => ({ ...current, fitSetup: { ...current.fitSetup, [key]: value } }));
   };
   const updateComponentSetup = (key, value) => {
-    if (!selectedBike) return;
+    if (!selectedBike && !isPresetExperienceMode) return;
     markFirstBikeForPersistence();
     updateSelectedBike((current) => {
       if (key === "frameColor" || key === "forkColor") return { ...current, [key]: value };
@@ -231,12 +250,13 @@ export function App() {
     const operation = importOperation ?? { type: "add", targetIndex: null };
     if (operation.type === "add" || operation.type === "manual") {
       if (bikes.length >= MAX_BIKES) return;
-      const base = createComparisonBike(createBikeId(), getPersistableBikeSetup(selectedBike ?? demoBike));
+      const base = createComparisonBike(createBikeId(), getPersistableBikeSetup(workspaceBike));
       const importedBike = createBikeFromGeometryImport(base, geometryImportDraft, geometryImportImage);
       const nextIndex = bikes.length;
       setBikes((current) => addWorkspaceBike(current, importedBike));
       setActiveBikeIndex(nextIndex);
       setCompareEnabled(false);
+      setIsPresetExperienceMode(false);
     } else {
       const currentBike = bikes[operation.targetIndex];
       if (!currentBike) return;
@@ -247,11 +267,27 @@ export function App() {
     clearImportFlow();
     return validation;
   };
-  const useWelcomePreset = () => {
-    const bike = createComparisonBike(createBikeId(), initialSetup);
+  const startPresetExperience = () => {
+    setActivePresetBikeId(DEFAULT_PRESET_BIKE_ID);
+    setIsPresetExperienceMode(true);
+    setActiveBikeIndex(null);
+    setCompareEnabled(false);
+  };
+  const requestPresetComparison = () => {
+    setPendingPresetComparisonId(activePresetBikeId);
+  };
+  const cancelPresetComparison = () => {
+    setPendingPresetComparisonId(null);
+  };
+  const confirmPresetComparison = () => {
+    const bike = instantiatePresetExperienceBike(pendingPresetComparisonBike, createBikeId());
+    if (!bike) return;
+    shouldPersistSetup.current = true;
+    setPendingPresetComparisonId(null);
     setBikes([bike]);
     setActiveBikeIndex(0);
     setCompareEnabled(false);
+    setIsPresetExperienceMode(false);
   };
   const selectWelcomeImage = (file) => {
     const operation = { type: "add", targetIndex: null };
@@ -295,6 +331,7 @@ export function App() {
     const nextBikes = deleteWorkspaceBike(bikes, managementIndex);
     setBikes(nextBikes);
     setActiveBikeIndex(nextBikes.length ? 0 : null);
+    if (!nextBikes.length) setIsPresetExperienceMode(false);
     setCompareEnabled(false);
     clearImportFlow();
     closeBikeManagement();
@@ -303,11 +340,12 @@ export function App() {
   return (
     <div className={`app-shell${showWelcomeGate ? " app-shell--welcome" : ""}`}>
       <header className="site-header"><img className="site-header__logo" src={brandLogo} alt="Bike Geometry Lab" /></header>
-      <main className={`workspace${isStageFullscreen ? " workspace--stage-fullscreen" : ""}${isGeometryImportActive ? " workspace--geometry-import" : ""}`} id="top" inert={showWelcomeGate ? true : undefined}>
+      <main className={`workspace${isStageFullscreen ? " workspace--stage-fullscreen" : ""}${isGeometryImportActive ? " workspace--geometry-import" : ""}`} id="top" inert={showWelcomeGate || pendingPresetComparisonBike ? true : undefined}>
         <div className="workspace-prism-background" aria-hidden="true"><Prism animationType="rotate" timeScale={0.3} height={6.4} baseWidth={5.7} scale={2.4} hueShift={0} colorFrequency={1} noise={0} glow={0.7} transparent /></div>
         <FrameGeometryPanel
           bike={workspaceBike}
           setFrameSize={setFrameSize}
+          setSeatStayStyle={setSeatStayStyle}
           updateComponentSetup={updateComponentSetup}
           geometryImport={{
             status: geometryImportStatus,
@@ -334,7 +372,10 @@ export function App() {
         <div className="main-stage">
           <BikeVisualizer
             bikes={bikes}
-            demoBike={demoBike}
+            demoBike={activePresetBike}
+            presetExperienceMode={isPresetExperienceMode}
+            presetExperienceBikes={orderedPresetExperienceBikes}
+            activePresetBikeId={activePresetBikeId}
             activeBikeIndex={isGeometryImportActive ? null : activeBikeIndex}
             stagePreviewBike={isGeometryImportActive ? importPreviewBike : null}
             frameOnly={isGeometryImportActive}
@@ -346,13 +387,20 @@ export function App() {
             onCompareEnabledChange={setCompareEnabled}
             onAddBike={addComparisonBikeFromImage}
             onManageBike={openBikeManagement}
+            onPresetBikeChange={setActivePresetBikeId}
+            onRequestPresetComparison={requestPresetComparison}
             isStageFullscreen={isStageFullscreen}
             onToggleStageFullscreen={() => setIsStageFullscreen((current) => !current)}
           />
         </div>
         <BikeSetupPanel fitSetup={workspaceBike.fitSetup} updateFitSetup={updateFitSetup} componentSetup={workspaceBike.componentSetup} updateComponentSetup={updateComponentSetup} isStageFullscreen={isStageFullscreen || isGeometryImportActive} />
       </main>
-      {showWelcomeGate && <WelcomeGate onUsePreset={useWelcomePreset} onSelectImage={selectWelcomeImage} onManualEntry={startManualGeometryImport} />}
+      {showWelcomeGate && <WelcomeGate onStartPresetExperience={startPresetExperience} onSelectImage={selectWelcomeImage} onManualEntry={startManualGeometryImport} />}
+      <PresetComparisonConfirmModal
+        bike={pendingPresetComparisonBike}
+        onCancel={cancelPresetComparison}
+        onConfirm={confirmPresetComparison}
+      />
       <BikeManagementModal
         bike={managementIndex == null ? null : bikes[managementIndex]}
         stage={managementStage}
