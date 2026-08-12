@@ -4,6 +4,7 @@
 - Landing 是独立轻量首屏：实验室视觉器、Prism、Frame/Setup 面板、Modal 与 Geometry Import 必须通过动态 import 在进入实验室或上传流程后才加载；Landing DotField 初始静态绘制，交互后短暂动画，静止、后台与 reduced-motion 状态不得持续 RAF。
 - Landing 底部能力区的底部 inset 与左侧 inset 使用同一响应式值，保持海报边界节奏一致。
 - Landing Hero 文案与底部能力区构成同一内容栈，二者的垂直间距必须复用左侧 inset 的同一响应式 token，不使用互不关联的绝对坐标。
+- Landing 右上角 `©Design By Sardine` 是低权重、可点击的开发者彩蛋入口；只在 Landing 本地打开个人故事 Modal，不新增路由、不改变 Workspace 状态。文案保持上海骑友 / UX 设计狗 / 野生开发者的个人语气，避免企业 About Us 口吻。
 
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
 

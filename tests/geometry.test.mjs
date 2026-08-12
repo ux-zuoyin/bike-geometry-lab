@@ -1052,6 +1052,10 @@ test("the independent Landing Page has one CTA into the unchanged Welcome Gate",
   assert.match(landingPageSource, /<img className="landing-page__background" src=\{landingBikePartsImage\} alt="" \/>/);
   assert.match(landingPageSource, /理解几何，<br \/>找到属于你的那辆车/);
   assert.match(landingPageSource, />\s*进入几何实验室 /);
+  assert.match(landingPageSource, /className="landing-page__copyright"[\s\S]*setIsDeveloperAboutOpen\(true\)[\s\S]*©Design By Sardine/);
+  assert.match(landingPageSource, /export function DeveloperAboutModal[\s\S]*role="dialog"[\s\S]*关于这个小破站[\s\S]*UX 设计狗[\s\S]*Ride more\. Guess less\./);
+  assert.match(landingPageSource, /<DeveloperAboutModal[\s\S]*isOpen=\{isDeveloperAboutOpen\}/);
+  assert.match(landingPageSource, /event\.key === "Escape"[\s\S]*document\.body\.style\.overflow = "hidden"/);
   assert.match(landingPageSource, /landing-page__capabilities[\s\S]*01[\s\S]*先感受，再选择[\s\S]*02[\s\S]*让几何自己说话[\s\S]*03[\s\S]*定义你的那辆车/);
   assert.match(stylesSource, /\.landing-page\s*\{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden/s);
   assert.match(stylesSource, /\.landing-page__wall\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*0/s);
@@ -1062,6 +1066,9 @@ test("the independent Landing Page has one CTA into the unchanged Welcome Gate",
   assert.match(stylesSource, /\.landing-page__hero\s*\{[^}]*pointer-events:\s*none/s);
   assert.match(stylesSource, /\.landing-page__copy\s*\{[^}]*pointer-events:\s*auto/s);
   assert.match(stylesSource, /\.landing-page__header\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*space-between/s);
+  assert.match(stylesSource, /\.landing-page__copyright:hover\s*\{[^}]*border-bottom-color:[^}]*color:/s);
+  assert.match(stylesSource, /\.landing-developer-about-backdrop\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*background:\s*rgba\(0,0,0,\.72\)/s);
+  assert.match(stylesSource, /\.landing-developer-about\s*\{[^}]*width:\s*min\(650px, calc\(100vw - 64px\)\);[^}]*border-radius:\s*22px/s);
   assert.match(stylesSource, /\.landing-page__capabilities\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);[^}]*column-gap:\s*clamp\(48px, 4\.4vw, 72px\)/);
   assert.doesNotMatch(stylesSource.match(/\.landing-page__capabilities\s*\{[^}]*\}/s)?.[0] ?? "", /border-top/);
   assert.match(stylesSource, /\.landing-page__capability\s*\{[^}]*padding:\s*0;/);
@@ -1437,7 +1444,8 @@ test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without
   assert.doesNotMatch(appSource, /isSetupPanelOpen|隐藏设定|显示设定|aria-label="关于"|aria-label="帮助"/);
   assert.doesNotMatch(appSource, /className="topbar"|className="brand"|className="topbar-context"|公路车几何设定首页|当前车型/);
   assert.match(appSource, /import brandLogo from "\.\/assets\/brand\/logo_bai\.png"/);
-  assert.match(appSource, /<header className="site-header"[\s\S]*<div className="site-header__brand-row">[\s\S]*<button className="site-header__brand-button"[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<WorkspaceModeNavigation[\s\S]*<span className="site-header__copyright">©Design By Sardine<\/span>[\s\S]*<\/div>[\s\S]*<\/header>/);
+  assert.match(appSource, /<header className="site-header"[\s\S]*<div className="site-header__brand-row">[\s\S]*<button className="site-header__brand-button"[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<WorkspaceModeNavigation[\s\S]*<button[\s\S]*className="site-header__copyright"[\s\S]*setIsDeveloperAboutOpen\(true\)[\s\S]*©Design By Sardine[\s\S]*<\/button>[\s\S]*<\/div>[\s\S]*<\/header>/);
+  assert.match(appSource, /<DeveloperAboutModal[\s\S]*isOpen=\{isDeveloperAboutOpen\}[\s\S]*returnFocusRef=\{developerAboutTriggerRef\}/);
   assert.match(stylesSource, /\.site-header\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
   assert.match(stylesSource, /\.site-header__brand-row\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*padding:\s*0 var\(--app-shell-padding-x\);[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\);[^}]*align-items:\s*center/s);
   assert.match(stylesSource, /\.site-header__brand-button\s*\{[^}]*justify-self:\s*start;[^}]*background:\s*transparent;/s);
