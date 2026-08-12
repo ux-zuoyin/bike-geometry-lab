@@ -181,6 +181,14 @@ import {
   getWorkspaceEntryModeLabel,
   hasUnfinishedGeometryTask,
 } from "../src/state/workspaceEntryMode.js";
+import {
+  LAB_MODE_PARAM,
+  LAB_VIEW_PARAM,
+  LAB_VIEW_VALUE,
+  createLabPageUrl,
+  createLandingPageUrl,
+  shouldShowLandingPage,
+} from "../src/state/landingPageState.js";
 
 const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.a - 1),
@@ -229,6 +237,8 @@ const prismCssSource = readFileSync(
 );
 const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const landingPageSource = readFileSync(new URL("../src/components/landing/LandingPage.jsx", import.meta.url), "utf8");
+const dotFieldSource = readFileSync(new URL("../src/components/landing/DotField.jsx", import.meta.url), "utf8");
 const frameBottomBracketSource = readFileSync(
   new URL("../src/assets/bikeTemplates/endurance/frame-bottom-bracket.svg", import.meta.url),
   "utf8",
@@ -998,6 +1008,72 @@ test("zero-bike Welcome Gate opens the three-category Preset Experience", () => 
   assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
 });
 
+test("the independent Landing Page has one CTA into the unchanged Welcome Gate", () => {
+  assert.equal(LAB_VIEW_PARAM, "view");
+  assert.equal(LAB_VIEW_VALUE, "lab");
+  assert.equal(LAB_MODE_PARAM, "mode");
+  assert.equal(shouldShowLandingPage({ search: "" }), true);
+  assert.equal(shouldShowLandingPage({ search: "?view=lab" }), false);
+  assert.equal(shouldShowLandingPage({ search: "?view=lab&mode=upload" }), false);
+  assert.equal(createLabPageUrl(null, "https://bikelabfeel.top/?campaign=summer"), "/?campaign=summer&view=lab");
+  assert.equal(createLabPageUrl("manual", "https://bikelabfeel.top/?campaign=summer"), "/?campaign=summer&view=lab&mode=manual");
+  assert.equal(createLandingPageUrl("https://bikelabfeel.top/?campaign=summer&view=lab&mode=upload"), "/?campaign=summer");
+
+  assert.match(appSource, /const \[showLandingPage, setShowLandingPage\] = useState\(\(\) => shouldShowLandingPage\(\)\)/);
+  assert.match(appSource, /window\.addEventListener\("popstate", syncPageFromLocation\)/);
+  assert.match(appSource, /const \[landingTransition, setLandingTransition\] = useState\(null\)/);
+  assert.match(appSource, /const completeLandingTransition = useCallback\(\(transition\) => \{[\s\S]*transition === "exit"[\s\S]*createLabPageUrl\(\)[\s\S]*setShowLandingPage\(false\)/);
+  assert.match(appSource, /const enterLab = \(\) => \{[\s\S]*setLandingTransition\("exit"\)/);
+  assert.match(appSource, /const openLandingPage = \(\) => \{[\s\S]*setShowLandingPage\(true\);[\s\S]*setLandingTransition\("enter"\)/);
+  assert.match(appSource, /const performWorkspaceModeChange = \(nextMode\) => \{[\s\S]*createLabPageUrl\(nextMode\)/);
+  assert.match(appSource, /\(!showLandingPage \|\| landingTransition === "exit"\) && \([\s\S]*<div className=\{`app-shell/);
+  assert.match(appSource, /showLandingPage && \([\s\S]*<LandingPage[\s\S]*transitionState=\{landingTransition\}[\s\S]*onTransitionComplete=\{completeLandingTransition\}/);
+  assert.match(appSource, /site-header__brand-button[\s\S]*onClick=\{openLandingPage\}/);
+  assert.doesNotMatch(appSource + landingPageSource, /sessionStorage|localStorage/);
+  assert.doesNotMatch(appSource, /setBikes\(\[\]\)[\s\S]*setShowLandingPage\(true\)/);
+
+  assert.match(appSource, /import \{ lazy, Suspense,/);
+  assert.match(appSource, /const BikeVisualizer = lazyNamed\(\(\) => import\("\.\/components\/visualizer\/BikeVisualizer\.jsx"\), "BikeVisualizer"\);/);
+  assert.match(appSource, /const FrameGeometryPanel = lazyNamed\(\(\) => import\("\.\/components\/panels\/FrameGeometryPanel\.jsx"\), "FrameGeometryPanel"\);/);
+  assert.match(appSource, /const \{ analyzeGeometryImage \} = await import\("\.\/services\/geometryImageAnalyzer\.js"\);/);
+  assert.doesNotMatch(appSource, /import \{ BikeVisualizer \} from/);
+  assert.doesNotMatch(appSource, /import \{ FrameGeometryPanel \} from/);
+  assert.match(dotFieldSource, /maxDots = 5200/);
+  assert.match(dotFieldSource, /Math\.max\(baseStep, Math\.sqrt\(\(w \* h\) \/ maximum\)\)/);
+  assert.match(dotFieldSource, /document\.addEventListener\("visibilitychange", onVisibilityChange\)/);
+  assert.doesNotMatch(dotFieldSource, /setInterval\(/);
+
+  assert.doesNotMatch(landingPageSource, /WORKSPACE_ENTRY_MODE_OPTIONS|onEnterMode/);
+  assert.equal((landingPageSource.match(/src=\{brandLogo\}/g) ?? []).length, 1);
+  assert.doesNotMatch(landingPageSource, /AccordionGallery|DriftWall|WORKSPACE_ENTRY_MODE_OPTIONS|onEnterMode/);
+  assert.match(landingPageSource, /import DotField from "\.\/DotField"/);
+  assert.match(landingPageSource, /<div className="landing-page__dot-field">[\s\S]*<DotField[\s\S]*dotRadius=\{1\.5\}[\s\S]*dotSpacing=\{14\}[\s\S]*bulgeStrength=\{67\}/);
+  assert.match(landingPageSource, /import landingBikePartsImage from "\.\.\/\.\.\/assets\/splash\/landing-bike-parts\.webp"/);
+  assert.match(landingPageSource, /<img className="landing-page__background" src=\{landingBikePartsImage\} alt="" \/>/);
+  assert.match(landingPageSource, /理解几何，<br \/>找到属于你的那辆车/);
+  assert.match(landingPageSource, />\s*进入几何实验室 /);
+  assert.match(landingPageSource, /landing-page__capabilities[\s\S]*01[\s\S]*先感受，再选择[\s\S]*02[\s\S]*让几何自己说话[\s\S]*03[\s\S]*定义你的那辆车/);
+  assert.match(stylesSource, /\.landing-page\s*\{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden/s);
+  assert.match(stylesSource, /\.landing-page__wall\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*0/s);
+  assert.match(stylesSource, /\.landing-page__background\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*0;[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*object-fit:\s*cover;[^}]*object-position:\s*center/s);
+  assert.match(stylesSource, /\.landing-page__dot-field\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*1;[^}]*pointer-events:\s*none/s);
+  assert.match(stylesSource, /\.landing-page__copy\s*\{[^}]*width:\s*min\(39vw, 610px\)/s);
+  assert.match(stylesSource, /\.landing-page__content-stack\s*\{[^}]*left:\s*var\(--landing-content-inset\);[^}]*bottom:\s*var\(--landing-content-inset\);[^}]*row-gap:\s*var\(--landing-content-inset\)/s);
+  assert.match(stylesSource, /\.landing-page__hero\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(stylesSource, /\.landing-page__copy\s*\{[^}]*pointer-events:\s*auto/s);
+  assert.match(stylesSource, /\.landing-page__header\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*space-between/s);
+  assert.match(stylesSource, /\.landing-page__capabilities\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);[^}]*column-gap:\s*clamp\(48px, 4\.4vw, 72px\)/);
+  assert.doesNotMatch(stylesSource.match(/\.landing-page__capabilities\s*\{[^}]*\}/s)?.[0] ?? "", /border-top/);
+  assert.match(stylesSource, /\.landing-page__capability\s*\{[^}]*padding:\s*0;/);
+  assert.match(stylesSource, /--app-header-height:\s*64px;[\s\S]*--app-shell-padding-x:\s*32px;[\s\S]*--app-brand-logo-height:\s*36px;/);
+  assert.match(stylesSource, /\.site-header__brand-row\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*padding:\s*0 var\(--app-shell-padding-x\)/s);
+  assert.match(stylesSource, /\.landing-page__header\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*padding:\s*0 var\(--app-shell-padding-x\)/s);
+  assert.match(stylesSource, /\.landing-page--exit \.landing-page__wall[\s\S]*landing-wall-exit/);
+  assert.match(stylesSource, /\.landing-page--enter \.landing-page__wall[\s\S]*landing-wall-enter/);
+  assert.match(stylesSource, /\.landing-page--exit\s*\{[^}]*animation:\s*landing-page-exit/);
+  assert.doesNotMatch(stylesSource, /\.landing-page__nav/);
+});
+
 test("Workspace entry modes remain a global layer above Preset bike selection and protect unfinished drafts", () => {
   assert.deepEqual(WORKSPACE_ENTRY_MODE, {
     PRESET: "preset",
@@ -1022,8 +1098,8 @@ test("Workspace entry modes remain a global layer above Preset bike selection an
   assert.match(appSource, /setWorkspaceEntryMode\(WORKSPACE_ENTRY_MODE\.UPLOAD\)[\s\S]*setWorkspaceTaskMode\(WORKSPACE_ENTRY_MODE\.UPLOAD\)/);
   assert.match(appSource, /setWorkspaceEntryMode\(WORKSPACE_ENTRY_MODE\.MANUAL\)[\s\S]*setWorkspaceTaskMode\(WORKSPACE_ENTRY_MODE\.MANUAL\)/);
   assert.match(bikeVisualizerSource, /presetExperienceMode \? \[demoBike\]/);
-  assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*64px;[^}]*align-items:\s*stretch;[^}]*justify-self:\s*center/s);
-  assert.match(stylesSource, /\.workspace-mode-nav__items\s*\{[^}]*height:\s*64px;[^}]*gap:\s*28px/s);
+  assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*align-items:\s*stretch;[^}]*justify-self:\s*center/s);
+  assert.match(stylesSource, /\.workspace-mode-nav__items\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*gap:\s*28px/s);
   assert.match(stylesSource, /\.workspace-mode-nav__items button\.is-selected\s*\{[^}]*background:\s*transparent;[^}]*color:\s*#65A0FF/s);
   assert.doesNotMatch(stylesSource, /\.site-header--with-mode-nav|\.workspace\.workspace--with-mode-nav|calc\(100vh - 108px\)/);
 });
@@ -1361,13 +1437,14 @@ test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without
   assert.doesNotMatch(appSource, /isSetupPanelOpen|隐藏设定|显示设定|aria-label="关于"|aria-label="帮助"/);
   assert.doesNotMatch(appSource, /className="topbar"|className="brand"|className="topbar-context"|公路车几何设定首页|当前车型/);
   assert.match(appSource, /import brandLogo from "\.\/assets\/brand\/logo_bai\.png"/);
-  assert.match(appSource, /<header className="site-header"[\s\S]*<div className="site-header__brand-row">[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<WorkspaceModeNavigation[\s\S]*<span className="site-header__copyright">©Design By Sardine<\/span>[\s\S]*<\/div>[\s\S]*<\/header>/);
-  assert.match(stylesSource, /\.site-header\s*\{[^}]*height:\s*64px;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
-  assert.match(stylesSource, /\.site-header__brand-row\s*\{[^}]*height:\s*64px;[^}]*padding:\s*0 20px;[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\);[^}]*align-items:\s*center/s);
-  assert.match(stylesSource, /\.site-header__logo\s*\{[^}]*height:\s*36px;[^}]*object-fit:\s*contain;[^}]*justify-self:\s*start;/s);
-  assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*64px;[^}]*justify-self:\s*center;/s);
+  assert.match(appSource, /<header className="site-header"[\s\S]*<div className="site-header__brand-row">[\s\S]*<button className="site-header__brand-button"[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<WorkspaceModeNavigation[\s\S]*<span className="site-header__copyright">©Design By Sardine<\/span>[\s\S]*<\/div>[\s\S]*<\/header>/);
+  assert.match(stylesSource, /\.site-header\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
+  assert.match(stylesSource, /\.site-header__brand-row\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*padding:\s*0 var\(--app-shell-padding-x\);[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\);[^}]*align-items:\s*center/s);
+  assert.match(stylesSource, /\.site-header__brand-button\s*\{[^}]*justify-self:\s*start;[^}]*background:\s*transparent;/s);
+  assert.match(stylesSource, /\.site-header__logo\s*\{[^}]*height:\s*var\(--app-brand-logo-height\);[^}]*object-fit:\s*contain;/s);
+  assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*justify-self:\s*center;/s);
   assert.match(stylesSource, /\.site-header__copyright\s*\{[^}]*justify-self:\s*end;[^}]*font-size:\s*var\(--font-size-xs\);[^}]*white-space:\s*nowrap;/s);
-  assert.match(stylesSource, /\.workspace\s*\{[^}]*height:\s*calc\(100vh - 64px\);[^}]*min-height:\s*656px;/s);
+  assert.match(stylesSource, /\.workspace\s*\{[^}]*height:\s*calc\(100vh - var\(--app-header-height\)\);[^}]*min-height:\s*656px;/s);
   assert.doesNotMatch(appSource, /workspace--with-mode-nav|site-header--with-mode-nav/);
   assert.doesNotMatch(stylesSource, /\.topbar(?:\s|\.|\{|,)|\.brand(?:\s|\.|\{|,)|\.topbar-context(?:\s|\.|\{|,)|calc\(100vh\s*-\s*(?:68px|56px)\)/);
 });
@@ -1424,7 +1501,7 @@ test("stage fullscreen replaces local zoom controls and preserves the mounted wo
 });
 
 test("the workspace uses the supplied official Prism without site-side lighting effects", () => {
-  assert.match(appSource, /import Prism from "\.\/components\/visualizer\/Prism\.jsx"/);
+  assert.match(appSource, /const Prism = lazy\(\(\) => import\("\.\/components\/visualizer\/Prism\.jsx"\)\);/);
   assert.match(appSource, /className="workspace-prism-background" aria-hidden="true"/);
   assert.match(appSource, /<Prism[\s\S]*animationType="rotate"[\s\S]*timeScale=\{0\.3\}[\s\S]*height=\{6\.4\}[\s\S]*baseWidth=\{5\.7\}[\s\S]*scale=\{2\.4\}[\s\S]*hueShift=\{0\}[\s\S]*colorFrequency=\{1\}[\s\S]*noise=\{0\}[\s\S]*glow=\{0\.7\}[\s\S]*transparent[\s\S]*\/>/);
   assert.doesNotMatch(appSource, /StageSpotlight|className="stage-ground|stage-cone|stage-light|bloom=/);

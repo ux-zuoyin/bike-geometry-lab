@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ColorPalette } from "../ui/ColorPalette.jsx";
 import { SegmentedControl } from "../ui/Stepper.jsx";
-import { GeometryImagePicker, GeometryImportFlow } from "../import/GeometryImportFlow.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 import { sortBikeSizes } from "../../lib/geometry/sizeSorting.js";
 
 const GEOMETRY_LANGUAGE_STORAGE_KEY = "bike-geometry-lab:geometry-language";
+const lazyNamed = (loader, name) => lazy(() => loader().then((module) => ({ default: module[name] })));
+const GeometryImagePicker = lazyNamed(() => import("../import/GeometryImportFlow.jsx"), "GeometryImagePicker");
+const GeometryImportFlow = lazyNamed(() => import("../import/GeometryImportFlow.jsx"), "GeometryImportFlow");
 
 const geometryDetails = [
   { key: "seatTubeLengthMm", unit: "mm", zh: "座管长度", en: "Seat Tube" },
@@ -43,7 +45,9 @@ function GeometryTaskLauncher({ mode, onSelectImage, onStartManual }) {
         {isManual ? (
           <button type="button" className="geometry-import__primary geometry-task-launcher__manual" onClick={onStartManual}>开始手动录入</button>
         ) : (
-          <GeometryImagePicker onSelectImage={onSelectImage} />
+          <Suspense fallback={<div className="geometry-import__loading" aria-live="polite" />}>
+            <GeometryImagePicker onSelectImage={onSelectImage} />
+          </Suspense>
         )}
       </section>
     </div>
@@ -91,7 +95,9 @@ export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updat
             onStartManual={geometryImport.onStartManual}
           />
         ) : !isImportReady ? (
-          <GeometryImportFlow {...geometryImport} />
+          <Suspense fallback={<div className="geometry-import__loading" aria-live="polite" />}>
+            <GeometryImportFlow {...geometryImport} />
+          </Suspense>
         ) : (
           <>
         <PanelSection
