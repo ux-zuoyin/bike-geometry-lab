@@ -4,7 +4,7 @@ import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersiste
 import { createBikeFromGeometryImport, createComparisonBike, createPresetExperiencePack, getPersistableBikeSetup, instantiatePresetExperienceBike, updateBikeSeatStayStyle, updateBikeSize } from "./state/dualBikeState.js";
 import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
-import { LandingPage } from "./components/landing/LandingPage.jsx";
+import { DeveloperAboutModal, LandingPage } from "./components/landing/LandingPage.jsx";
 import brandLogo from "./assets/brand/logo_bai.png";
 import { DEFAULT_PRESET_BIKE_ID, PRESET_EXPERIENCE_IDS } from "./data/presetExperience.js";
 import { hasUnfinishedGeometryTask, WORKSPACE_ENTRY_MODE } from "./state/workspaceEntryMode.js";
@@ -31,6 +31,7 @@ export function App() {
   const [presetExperienceBikes, setPresetExperienceBikes] = useState(() => createPresetExperiencePack(initialSetup));
   const [showLandingPage, setShowLandingPage] = useState(() => shouldShowLandingPage());
   const [landingTransition, setLandingTransition] = useState(null);
+  const [isDeveloperAboutOpen, setIsDeveloperAboutOpen] = useState(false);
   const [activePresetBikeId, setActivePresetBikeId] = useState(DEFAULT_PRESET_BIKE_ID);
   const [isPresetExperienceMode, setIsPresetExperienceMode] = useState(false);
   const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(false);
@@ -54,6 +55,7 @@ export function App() {
   const nextBikeNumber = useRef(1);
   const shouldPersistSetup = useRef(false);
   const analysisRequestId = useRef(0);
+  const developerAboutTriggerRef = useRef(null);
 
   const selectedBike = activeBikeIndex == null ? null : bikes[activeBikeIndex] ?? null;
   const activePresetBike = presetExperienceBikes[activePresetBikeId];
@@ -479,7 +481,14 @@ export function App() {
           {showWorkspaceModeNavigation && (
             <WorkspaceModeNavigation value={workspaceEntryMode} onChange={requestWorkspaceModeChange} />
           )}
-          <span className="site-header__copyright">©Design By Sardine</span>
+          <button
+            ref={developerAboutTriggerRef}
+            className="site-header__copyright"
+            type="button"
+            onClick={() => setIsDeveloperAboutOpen(true)}
+          >
+            ©Design By Sardine
+          </button>
         </div>
       </header>
       <main className={`workspace${isStageFullscreen ? " workspace--stage-fullscreen" : ""}${isGeometryWorkspaceActive ? " workspace--geometry-import" : ""}`} id="top" inert={showWelcomeGate || pendingPresetComparisonBike || pendingWorkspaceMode ? true : undefined}>
@@ -558,6 +567,11 @@ export function App() {
         onReplace={replaceManagedBike}
         onRequestDelete={() => setManagementStage("delete")}
         onConfirmDelete={deleteManagedBike}
+      />
+      <DeveloperAboutModal
+        isOpen={isDeveloperAboutOpen}
+        onClose={() => setIsDeveloperAboutOpen(false)}
+        returnFocusRef={developerAboutTriggerRef}
       />
     </div>
       </Suspense>
