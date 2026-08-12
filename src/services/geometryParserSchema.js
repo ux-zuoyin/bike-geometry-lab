@@ -1,5 +1,12 @@
 export const GEOMETRY_PARSER_SCHEMA_VERSION = "1";
 
+export const GEOMETRY_PARSER_INPUT_TYPES = Object.freeze([
+  "road_bike_geometry",
+  "unsupported_bike_geometry",
+  "not_geometry",
+  "unreadable",
+]);
+
 export const GEOMETRY_PARSER_FIELDS = Object.freeze([
   { key: "seatTubeLength", label: "Seat Tube" },
   { key: "effectiveTopTube", label: "Effective Top Tube" },
@@ -49,8 +56,19 @@ const rawTableRowSchema = Object.freeze({
 export const GEOMETRY_PARSER_RAW_TABLE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["detectedSizeCount", "detectedSizes", "rawRows"],
+  required: ["inputClassification"],
   properties: {
+    inputClassification: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "confidence", "detectedBikeType", "reason"],
+      properties: {
+        type: { type: "string", enum: GEOMETRY_PARSER_INPUT_TYPES },
+        confidence: { type: ["number", "null"], minimum: 0, maximum: 1 },
+        detectedBikeType: { type: ["string", "null"] },
+        reason: { type: ["string", "null"] },
+      },
+    },
     detectedSizeCount: { type: "integer", minimum: 0 },
     detectedSizes: {
       type: "array",

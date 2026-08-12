@@ -58,7 +58,7 @@ export function WelcomeGate({ onStartPresetExperience, onSelectImage, onManualEn
             <ChartLineUp size={34} weight="regular" aria-hidden="true" />
             <span className="welcome-choice__eyebrow">上传官网几何图</span>
             <strong>官方车架几何图</strong>
-            <small>上传品牌官网 Geometry 图片，读取尺寸与几何数据</small>
+            <small>仅支持耐力型 / 综合型 / 破风型公路车官方几何表</small>
             <span className="welcome-choice__formats">PNG · JPG · JPEG</span>
             <ArrowRight className="welcome-choice__arrow" size={24} weight="regular" aria-hidden="true" />
           </button>

@@ -2,7 +2,6 @@ import { GEOMETRY_PARSER_PLAUSIBILITY_RANGES } from "../services/geometryParserS
 import { ENDURANCE_VISUAL_BASE_GEOMETRY } from "../data/enduranceGeometry.js";
 import {
   BIKE_CATEGORIES,
-  DEFAULT_BIKE_CATEGORY,
   normalizeBikeCategory,
 } from "../config/bikeArchetypes.js";
 import { sortBikeSizes } from "../lib/geometry/sizeSorting.js";
@@ -55,7 +54,7 @@ export function createManualGeometryImportDraft() {
     geometryValueSource: "manual",
     brand: "",
     model: "",
-    category: DEFAULT_BIKE_CATEGORY,
+    category: null,
     candidateSizes: { [MANUAL_GEOMETRY_SIZE_PLACEHOLDER]: { ...geometry } },
     sizes: { [MANUAL_GEOMETRY_SIZE_PLACEHOLDER]: { ...geometry } },
     selectedImportSizes: [MANUAL_GEOMETRY_SIZE_PLACEHOLDER],
@@ -82,7 +81,9 @@ export function getSelectedImportSizes(draft) {
     ...(draft?.detectedSizes ?? []).map(toSize),
     ...candidateKeys,
   ])];
-  if (selected.length) return sortBikeSizes(selected, { sourceOrder });
+  if (Array.isArray(draft?.selectedImportSizes)) {
+    return sortBikeSizes(selected, { sourceOrder });
+  }
   const selectedSize = toSize(draft?.selectedSize);
   if (candidateKeys.includes(selectedSize)) return [selectedSize];
   return candidateKeys[0] ? [candidateKeys[0]] : [];
@@ -105,6 +106,15 @@ function applyImportSizeSelection(draft, selectedImportSizes) {
     selectedImportSizes.filter((size) => candidateSizes[size]),
     { sourceOrder },
   );
+  const previousSelectedSize = toSize(draft.selectedSize);
+  const previousSelectedIndex = sourceOrder.indexOf(previousSelectedSize);
+  const nextSelectedSize = selected.includes(previousSelectedSize)
+    ? previousSelectedSize
+    : (
+      selected.find((size) => sourceOrder.indexOf(size) > previousSelectedIndex)
+      ?? selected[selected.length - 1]
+      ?? ""
+    );
   const sizes = Object.fromEntries(selected.map((size) => [size, cloneGeometry(candidateSizes[size])]));
   const allParserWarnings = Array.isArray(draft?.allParserWarnings)
     ? draft.allParserWarnings
@@ -115,7 +125,7 @@ function applyImportSizeSelection(draft, selectedImportSizes) {
     candidateSizes,
     sizes,
     selectedImportSizes: selected,
-    selectedSize: selected.includes(draft.selectedSize) ? draft.selectedSize : (selected[0] ?? ""),
+    selectedSize: nextSelectedSize,
     allParserWarnings,
     parserWarnings,
     parserConfirmationCount: parserWarnings.filter((warning) => (

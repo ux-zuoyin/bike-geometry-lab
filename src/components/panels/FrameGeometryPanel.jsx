@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ColorPalette } from "../ui/ColorPalette.jsx";
 import { SegmentedControl } from "../ui/Stepper.jsx";
-import { GeometryImportFlow } from "../import/GeometryImportFlow.jsx";
+import { GeometryImagePicker, GeometryImportFlow } from "../import/GeometryImportFlow.jsx";
 import { PanelSection } from "./PanelSection.jsx";
 import { sortBikeSizes } from "../../lib/geometry/sizeSorting.js";
 
@@ -27,10 +27,34 @@ const seatStayStyleOptions = Object.freeze([
   { value: "high", label: "高" },
 ]);
 
-export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updateComponentSetup, geometryImport, isStageFullscreen = false }) {
+function GeometryTaskLauncher({ mode, onSelectImage, onStartManual }) {
+  const isManual = mode === "manual";
+  return (
+    <div className="geometry-import geometry-import--selected geometry-task-launcher">
+      <section className="geometry-import__block">
+        <div className="geometry-import__state-heading">
+          <div>
+            <h3>{isManual ? "手动录入几何" : "上传官网几何图"}</h3>
+            <span>{isManual
+              ? "跳过图片识别，直接填写一个或多个尺码的官网数据。"
+              : "选择品牌官网 Geometry 图片，AI 将提取尺码与几何参数。"}</span>
+          </div>
+        </div>
+        {isManual ? (
+          <button type="button" className="geometry-import__primary geometry-task-launcher__manual" onClick={onStartManual}>开始手动录入</button>
+        ) : (
+          <GeometryImagePicker onSelectImage={onSelectImage} />
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updateComponentSetup, geometryImport, workspaceTaskMode = null, isStageFullscreen = false }) {
   const sizeData = bike.sizeData;
   const orderedSizes = sortBikeSizes(bike.sizes, { sourceOrder: bike.sizes });
   const isImportReady = geometryImport.status === "ready";
+  const isTaskLauncherVisible = isImportReady && workspaceTaskMode != null;
   const isManualImport = geometryImport.mode === "manual" || geometryImport.draft?.entryMode === "manual";
   const [geometryLanguage, setGeometryLanguage] = useState(() => {
     try {
@@ -52,13 +76,21 @@ export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updat
     <aside className="side-panel frame-panel" aria-label="车架与几何" aria-hidden={isStageFullscreen} inert={isStageFullscreen ? true : undefined}>
       <header className="panel-heading">
         <h2>车架几何</h2>
-        <p>{isImportReady
+        <p>{isTaskLauncherVisible
+          ? (workspaceTaskMode === "manual" ? "填写官网几何数据，不会调用图片识别。" : "选择官网几何图，识别后逐项核对数据。")
+          : isImportReady
           ? `选择车型与尺码。当前使用${bike.sourceLabel}。`
           : (isManualImport ? "填写官网几何数据，缺失的补充参数可留空。" : "请核对 AI 初步提取的车架几何数据。")}</p>
       </header>
 
       <div className="side-panel__scroll">
-        {!isImportReady ? (
+        {isTaskLauncherVisible ? (
+          <GeometryTaskLauncher
+            mode={workspaceTaskMode}
+            onSelectImage={geometryImport.onSelectImage}
+            onStartManual={geometryImport.onStartManual}
+          />
+        ) : !isImportReady ? (
           <GeometryImportFlow {...geometryImport} />
         ) : (
           <>
@@ -180,7 +212,9 @@ export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updat
         )}
       </div>
 
-      <footer><span className="status-dot" />{isImportReady
+      <footer><span className="status-dot" />{isTaskLauncherVisible
+        ? (workspaceTaskMode === "manual" ? "手动录入 · 本地 Draft · 不调用 AI" : "上传几何图 · 等待选择图片")
+        : isImportReady
         ? `${bike.brand} ${bike.model} · ${bike.sourceLabel} · mm / °`
         : (isManualImport ? "手动录入 · 本地 Draft · 不调用 AI" : "本地图片 · AI 初步提取 · 不上传")}</footer>
     </aside>

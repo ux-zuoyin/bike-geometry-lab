@@ -9,16 +9,18 @@ const ACCEPTED_IMAGE_TYPES = ".png,.jpg,.jpeg,image/png,image/jpeg";
 function FrameCategorySelector({ value, error, onChange }) {
   const errorId = "geometry-import-category-error";
   return (
-    <div className={`geometry-import__category${error ? " has-error" : ""}`}>
-      <span>车架类型</span>
+    <div
+      className={`geometry-import__category${error ? " has-error" : ""}`}
+      data-validation-key="category"
+      tabIndex={error ? -1 : undefined}
+    >
+      <span>车架类型 <b aria-hidden="true">*</b></span>
       <div
         className="geometry-import__category-options"
         role="group"
         aria-label="车架类型"
         aria-invalid={Boolean(error)}
         aria-describedby={error ? errorId : undefined}
-        data-validation-key="category"
-        tabIndex={error ? -1 : undefined}
       >
         {BIKE_CATEGORIES.map((category) => (
           <button
@@ -51,7 +53,7 @@ export function GeometryImagePicker({ onSelectImage, compact = false, label = "�
         <button type="button" className="geometry-import__text-button" onClick={() => inputRef.current?.click()}>{label}</button>
       ) : (
         <button type="button" className="geometry-upload-zone" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); submitFiles(event.dataTransfer.files); }}>
-          <UploadSimple size={30} weight="regular" aria-hidden="true" /><strong>上传车型几何图</strong><span>点击选择或拖入图片</span><small>PNG · JPG · JPEG</small>
+          <UploadSimple size={30} weight="regular" aria-hidden="true" /><strong>上传车型几何图</strong><span>当前仅支持公路车官方几何表：耐力型 / 综合型 / 破风型</span><small>点击选择或拖入 · PNG / JPG / JPEG</small>
         </button>
       )}
     </>
@@ -114,11 +116,15 @@ function GeometryFieldRows({ fields, draft, errors, parserWarnings, onGeometryFi
 function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
   const [newSize, setNewSize] = useState("");
   const [submitFeedback, setSubmitFeedback] = useState(null);
+  const [sizeSelectionHint, setSizeSelectionHint] = useState(null);
   const [errorNavigation, setErrorNavigation] = useState(null);
   const formRef = useRef(null);
   const submitAttemptRef = useRef(0);
   const sizes = getSelectedImportSizes(draft).filter((size) => draft.sizes[String(size)]);
-  const candidateSizeSource = draft.detectedSizes?.map(String) ?? Object.keys(draft.candidateSizes ?? draft.sizes);
+  const candidateSizeSource = [...new Set([
+    ...(draft.detectedSizes ?? []).map(String),
+    ...Object.keys(draft.candidateSizes ?? draft.sizes),
+  ])];
   const candidateSizes = sortBikeSizes(candidateSizeSource, { sourceOrder: candidateSizeSource });
   const selectedGeometry = draft.sizes[draft.selectedSize] ?? {};
   const parserWarnings = Array.isArray(draft.parserWarnings) ? draft.parserWarnings : [];
@@ -167,11 +173,19 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
     onCopySize(size);
     setNewSize("");
   };
+  const toggleCandidateSize = (size) => {
+    if (sizes.includes(size) && sizes.length === 1) {
+      setSizeSelectionHint("至少保留一个尺码");
+      return;
+    }
+    setSizeSelectionHint(null);
+    onToggleImportSize(size);
+  };
   const submit = () => {
     const validation = onConfirm();
     if (!validation?.isValid) {
       submitAttemptRef.current += 1;
-      setSubmitFeedback({ message: `还有 ${validation?.errorCount ?? 1} 项关键几何数据需要补充`, attempt: submitAttemptRef.current });
+      setSubmitFeedback({ message: `还有 ${validation?.errorCount ?? 1} 项必填信息需要补充`, attempt: submitAttemptRef.current });
       setErrorNavigation({ key: validation?.firstErrorKey, attempt: submitAttemptRef.current });
     }
   };
@@ -247,10 +261,11 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
         </div>
       </section>
       <section className="geometry-import__block">
-        <div className="geometry-import__review-title"><div><h3>你想导入哪些尺码？</h3><span>默认选择一个尺码；可按需添加相邻尺码</span></div><span>已选 {sizes.length} 个</span></div>
+        <div className="geometry-import__review-title"><div><h3>你想导入哪些尺码？</h3><span>默认全部导入，可取消不需要的尺码</span></div><span>已选 {sizes.length} 个</span></div>
         <div className="geometry-import__candidate-sizes size-selector-grid" role="group" aria-label="可导入尺码">
-          {candidateSizes.map((size) => <button type="button" key={size} className={sizes.includes(size) ? "is-selected" : ""} aria-pressed={sizes.includes(size)} title={size} onClick={() => onToggleImportSize(size)}>{size}</button>)}
+          {candidateSizes.map((size) => <button type="button" key={size} className={sizes.includes(size) ? "is-selected" : ""} aria-pressed={sizes.includes(size)} title={size} onClick={() => toggleCandidateSize(size)}>{size}</button>)}
         </div>
+        {sizeSelectionHint && <p className="geometry-import__selection-hint" role="status" aria-live="polite">{sizeSelectionHint}</p>}
         {sizes.length > 1 && <div className="geometry-import__selected-sizes size-selector-grid" role="group" aria-label="当前校对尺码">{sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} title={size} onClick={() => onSelectSize(size)}>{size}</button>)}</div>}
         <div className="geometry-import__add-size"><input data-validation-key="sizes" type="text" inputMode="decimal" value={newSize} aria-label="补充尺码" placeholder="输入尺码，例如 58" aria-invalid={Boolean(errors.sizes)} aria-describedby={errors.sizes ? "geometry-import-sizes-error" : undefined} onChange={(event) => setNewSize(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSize(); } }} /><button type="button" onClick={addSize}><Plus size={16} />补充尺码</button></div>
         {errors.sizes && <p id="geometry-import-sizes-error" className="geometry-import__inline-error" role="alert">{errors.sizes}</p>}
@@ -271,12 +286,35 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
   );
 }
 
-function ErrorState({ message, image, onSelectImage, onReanalyze, onCancel }) {
-  return <div className="geometry-import geometry-import--error"><section className="geometry-import__block"><WarningCircle size={30} weight="regular" aria-hidden="true" /><h3>AI 暂时无法提取这张图片</h3><p>{message}</p><div className="geometry-import__error-actions">{image && onReanalyze && <button type="button" className="geometry-import__secondary" onClick={onReanalyze}>重新识别</button>}<GeometryImagePicker compact label="重新上传图片" onSelectImage={onSelectImage} />{onCancel && <button type="button" className="geometry-import__cancel" onClick={onCancel}>取消</button>}</div></section></div>;
+const INPUT_ERROR_PRESENTATIONS = Object.freeze({
+  NOT_GEOMETRY_IMAGE: {
+    title: "这似乎不是车架几何图",
+    message: "当前仅支持公路车官方 Geometry / 几何数据表，请上传包含尺码、Stack、Reach 等参数的图片。",
+    canReanalyze: false,
+  },
+  UNSUPPORTED_BIKE_TYPE: {
+    title: "当前暂不支持这种车型",
+    message: "Bike Geometry Lab 目前仅支持耐力型、综合型和破风型公路车几何。",
+    canReanalyze: false,
+  },
+  GEOMETRY_IMAGE_UNREADABLE: {
+    title: "暂时无法读取这张几何图",
+    message: "请尝试上传更清晰、完整的官网几何表，避免裁切掉尺码或参数区域。",
+    canReanalyze: true,
+  },
+});
+
+function ErrorState({ code, message, image, onSelectImage, onReanalyze, onCancel }) {
+  const presentation = INPUT_ERROR_PRESENTATIONS[code] ?? {
+    title: "AI 暂时无法提取这张图片",
+    message,
+    canReanalyze: true,
+  };
+  return <div className="geometry-import geometry-import--error"><section className="geometry-import__block"><WarningCircle size={30} weight="regular" aria-hidden="true" /><h3>{presentation.title}</h3><p>{presentation.message}</p><div className="geometry-import__error-actions">{presentation.canReanalyze && image && onReanalyze && <button type="button" className="geometry-import__secondary" onClick={onReanalyze}>重新识别</button>}<GeometryImagePicker compact label="重新上传图片" onSelectImage={onSelectImage} />{onCancel && <button type="button" className="geometry-import__cancel" onClick={onCancel}>取消</button>}</div></section></div>;
 }
 
-export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorCode, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
   if (status === "analyzing" && image) return <AnalyzingState image={image} onSelectImage={onSelectImage} onCancel={onCancel} />;
   if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onToggleImportSize={onToggleImportSize} onAddSize={onAddSize} onCopySize={onCopySize} onManualSizeChange={onManualSizeChange} onGeometryFieldChange={onGeometryFieldChange} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
-  return <ErrorState message={errorMessage} image={image} onSelectImage={onSelectImage} onReanalyze={onReanalyze} onCancel={onCancel} />;
+  return <ErrorState code={errorCode} message={errorMessage} image={image} onSelectImage={onSelectImage} onReanalyze={onReanalyze} onCancel={onCancel} />;
 }
