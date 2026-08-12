@@ -1,28 +1,36 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { updateWheelSelection, updateWheelSelectionLink } from "./config/bikeComponents.js";
 import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersistence.js";
 import { createBikeFromGeometryImport, createComparisonBike, createPresetExperiencePack, getPersistableBikeSetup, instantiatePresetExperienceBike, updateBikeSeatStayStyle, updateBikeSize } from "./state/dualBikeState.js";
 import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
-import { analyzeGeometryImage } from "./services/geometryImageAnalyzer.js";
-import { FrameGeometryPanel } from "./components/panels/FrameGeometryPanel.jsx";
-import { BikeSetupPanel } from "./components/panels/BikeSetupPanel.jsx";
-import { BikeVisualizer } from "./components/visualizer/BikeVisualizer.jsx";
-import { BikeManagementModal } from "./components/comparison/BikeManagementModal.jsx";
-import Prism from "./components/visualizer/Prism.jsx";
-import { WelcomeGate } from "./components/import/WelcomeGate.jsx";
-import { PresetComparisonConfirmModal } from "./components/preset/PresetComparisonConfirmModal.jsx";
-import { WorkspaceModeNavigation } from "./components/navigation/WorkspaceModeNavigation.jsx";
-import { WorkspaceModeConfirmModal } from "./components/navigation/WorkspaceModeConfirmModal.jsx";
+import { LandingPage } from "./components/landing/LandingPage.jsx";
 import brandLogo from "./assets/brand/logo_bai.png";
 import { DEFAULT_PRESET_BIKE_ID, PRESET_EXPERIENCE_IDS } from "./data/presetExperience.js";
 import { hasUnfinishedGeometryTask, WORKSPACE_ENTRY_MODE } from "./state/workspaceEntryMode.js";
+import { createLabPageUrl, createLandingPageUrl, shouldShowLandingPage } from "./state/landingPageState.js";
 
 const GEOMETRY_PREVIEW_COLOR = "#E5E7EB";
+const lazyNamed = (loader, name) => lazy(() => loader().then((module) => ({ default: module[name] })));
+const FrameGeometryPanel = lazyNamed(() => import("./components/panels/FrameGeometryPanel.jsx"), "FrameGeometryPanel");
+const BikeSetupPanel = lazyNamed(() => import("./components/panels/BikeSetupPanel.jsx"), "BikeSetupPanel");
+const BikeVisualizer = lazyNamed(() => import("./components/visualizer/BikeVisualizer.jsx"), "BikeVisualizer");
+const BikeManagementModal = lazyNamed(() => import("./components/comparison/BikeManagementModal.jsx"), "BikeManagementModal");
+const Prism = lazy(() => import("./components/visualizer/Prism.jsx"));
+const WelcomeGate = lazyNamed(() => import("./components/import/WelcomeGate.jsx"), "WelcomeGate");
+const PresetComparisonConfirmModal = lazyNamed(() => import("./components/preset/PresetComparisonConfirmModal.jsx"), "PresetComparisonConfirmModal");
+const WorkspaceModeNavigation = lazyNamed(() => import("./components/navigation/WorkspaceModeNavigation.jsx"), "WorkspaceModeNavigation");
+const WorkspaceModeConfirmModal = lazyNamed(() => import("./components/navigation/WorkspaceModeConfirmModal.jsx"), "WorkspaceModeConfirmModal");
+
+function LabLoadingFallback() {
+  return <div className="app-shell app-shell--lab-loading" aria-live="polite" aria-label="正在进入几何实验室" />;
+}
 
 export function App() {
   const [initialSetup] = useState(() => readPersistedBikeSetup());
   const [presetExperienceBikes, setPresetExperienceBikes] = useState(() => createPresetExperiencePack(initialSetup));
+  const [showLandingPage, setShowLandingPage] = useState(() => shouldShowLandingPage());
+  const [landingTransition, setLandingTransition] = useState(null);
   const [activePresetBikeId, setActivePresetBikeId] = useState(DEFAULT_PRESET_BIKE_ID);
   const [isPresetExperienceMode, setIsPresetExperienceMode] = useState(false);
   const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(false);
@@ -83,6 +91,15 @@ export function App() {
     window.addEventListener("keydown", exitOnEscape);
     return () => window.removeEventListener("keydown", exitOnEscape);
   }, [isStageFullscreen]);
+
+  useEffect(() => {
+    const syncPageFromLocation = () => {
+      setShowLandingPage(shouldShowLandingPage());
+      setLandingTransition(null);
+    };
+    window.addEventListener("popstate", syncPageFromLocation);
+    return () => window.removeEventListener("popstate", syncPageFromLocation);
+  }, []);
 
   const createBikeId = () => `workspace-bike-${nextBikeNumber.current++}`;
   const updateBikeAt = (index, update) => setBikes((current) => current.map((bike, bikeIndex) => (
@@ -154,6 +171,7 @@ export function App() {
     setGeometryImportErrorMessage("");
     setGeometryImportErrorCode(null);
     try {
+      const { analyzeGeometryImage } = await import("./services/geometryImageAnalyzer.js");
       const analyzedDraft = await analyzeGeometryImage(image.file);
       if (requestId !== analysisRequestId.current) return;
       const targetBike = operation?.type === "edit" ? bikes[operation.targetIndex] : null;
@@ -395,6 +413,7 @@ export function App() {
       : { type: "add", targetIndex: null });
   };
   const performWorkspaceModeChange = (nextMode) => {
+    window.history.replaceState({ view: "lab", mode: nextMode }, "", createLabPageUrl(nextMode));
     if (nextMode === WORKSPACE_ENTRY_MODE.PRESET) {
       clearImportFlow();
       startPresetExperience();
@@ -425,11 +444,38 @@ export function App() {
     if (nextMode) performWorkspaceModeChange(nextMode);
   };
 
+  const completeLandingTransition = useCallback((transition) => {
+    if (transition === "exit") {
+      window.history.pushState({ view: "lab" }, "", createLabPageUrl());
+      setShowLandingPage(false);
+    }
+    if (transition === "enter") {
+      window.history.pushState({ view: "landing" }, "", createLandingPageUrl());
+    }
+    setLandingTransition(null);
+  }, []);
+
+  const enterLab = () => {
+    if (landingTransition) return;
+    setLandingTransition("exit");
+  };
+
+  const openLandingPage = () => {
+    if (showLandingPage) return;
+    setShowLandingPage(true);
+    setLandingTransition("enter");
+  };
+
   return (
+    <>
+      {(!showLandingPage || landingTransition === "exit") && (
+      <Suspense fallback={<LabLoadingFallback />}>
     <div className={`app-shell${showWelcomeGate ? " app-shell--welcome" : ""}`}>
       <header className="site-header" inert={pendingWorkspaceMode ? true : undefined}>
         <div className="site-header__brand-row">
-          <img className="site-header__logo" src={brandLogo} alt="Bike Geometry Lab" />
+          <button className="site-header__brand-button" type="button" onClick={openLandingPage} aria-label="返回首页">
+            <img className="site-header__logo" src={brandLogo} alt="Bike Geometry Lab" />
+          </button>
           {showWorkspaceModeNavigation && (
             <WorkspaceModeNavigation value={workspaceEntryMode} onChange={requestWorkspaceModeChange} />
           )}
@@ -514,5 +560,15 @@ export function App() {
         onConfirmDelete={deleteManagedBike}
       />
     </div>
+      </Suspense>
+      )}
+      {showLandingPage && (
+        <LandingPage
+          onEnterLab={enterLab}
+          transitionState={landingTransition}
+          onTransitionComplete={completeLandingTransition}
+        />
+      )}
+    </>
   );
 }

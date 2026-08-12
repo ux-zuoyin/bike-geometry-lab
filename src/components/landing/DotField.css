@@ -1,0 +1,17 @@
+.dot-field-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.dot-field-container__canvas,
+.dot-field-container__glow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dot-field-container__glow {
+  pointer-events: none;
+}
