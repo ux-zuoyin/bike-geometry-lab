@@ -28,10 +28,11 @@ export function createMockGeometryImportDraft() {
   return {
     brand: "",
     model: "",
-    category: "endurance",
+    category: null,
     candidateSizes,
-    sizes: { 54: { ...candidateSizes[54] } },
-    selectedImportSizes: ["54"],
+    sizes: Object.fromEntries(Object.entries(candidateSizes).map(([size, geometry]) => [size, { ...geometry }])),
+    selectedImportSizes: ["49", "52", "54", "56"],
     selectedSize: "54",
+    detectedSizes: ["49", "52", "54", "56"],
   };
 }

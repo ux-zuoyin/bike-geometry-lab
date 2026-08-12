@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   GEOMETRY_PARSER_FIELD_KEYS,
+  GEOMETRY_PARSER_INPUT_TYPES,
   GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
   GEOMETRY_PARSER_RAW_TABLE_SCHEMA,
   GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA,
@@ -19,6 +20,7 @@ import {
 import {
   isGeometryImportPreviewSafe,
   resolveGeometryImportPreview,
+  toggleGeometryImportSize,
 } from "../src/state/geometryImportState.js";
 import { createGeometryParserWorker } from "../worker/geometry-parser.js";
 import { mapRawGeometryTableToParserResponse } from "../src/services/geometryParserRawTableMapper.js";
@@ -58,8 +60,41 @@ const QWEN_TEST_ENV = Object.freeze({
   DASHSCOPE_COMPATIBLE_BASE_URL: "https://dashscope.example.test/compatible-mode/v1",
 });
 
+const createInputClassification = (type, overrides = {}) => ({
+  type,
+  confidence: 0.92,
+  detectedBikeType: null,
+  reason: null,
+  ...overrides,
+});
+
+async function requestQwenFixture(structuredOutput, { onParse } = {}) {
+  const worker = createGeometryParserWorker({
+    providerResolver: () => ({
+      id: "qwen",
+      async parse() {
+        onParse?.();
+        return { structuredOutput, meta: { provider: "qwen", model: "fixture" } };
+      },
+    }),
+  });
+  const formData = new FormData();
+  formData.append("image", createPngFile());
+  return worker.fetch(new Request("https://parser.example.test/api/geometry/parse", {
+    method: "POST",
+    body: formData,
+  }), { GEOMETRY_PARSER_PROVIDER: "qwen" });
+}
+
 test("raw-table provider schema requires source rows with aligned values", () => {
-  assert.deepEqual(GEOMETRY_PARSER_RAW_TABLE_SCHEMA.required, ["detectedSizeCount", "detectedSizes", "rawRows"]);
+  assert.deepEqual(GEOMETRY_PARSER_INPUT_TYPES, [
+    "road_bike_geometry", "unsupported_bike_geometry", "not_geometry", "unreadable",
+  ]);
+  assert.deepEqual(GEOMETRY_PARSER_RAW_TABLE_SCHEMA.required, ["inputClassification"]);
+  assert.deepEqual(
+    GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.inputClassification.properties.type.enum,
+    GEOMETRY_PARSER_INPUT_TYPES,
+  );
   const rawRowSchema = GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.rawRows.items;
   assert.deepEqual(rawRowSchema.required, ["label", "unit", "values"]);
   assert.deepEqual(rawRowSchema.properties.values.items.type, ["number", "null"]);
@@ -260,6 +295,30 @@ test("production client uploads the current File as multipart and returns parser
   assert.deepEqual(response.detectedSizes, QUICK_SIZES);
 });
 
+test("production client preserves classified business error codes", async () => {
+  const client = createGeometryParserClient({
+    endpoint: "https://parser.example.test/api/geometry/parse",
+    fetchImpl: async () => Response.json({
+      error: {
+        code: "NOT_GEOMETRY_IMAGE",
+        message: "这似乎不是车架几何图，请上传包含尺码与 Geometry 参数的公路车官方几何表。",
+        details: [{
+          inputClassification: createInputClassification("not_geometry"),
+        }],
+      },
+    }, { status: 422 }),
+  });
+
+  await assert.rejects(
+    () => client.parse(createPngFile()),
+    (error) => (
+      error.code === "NOT_GEOMETRY_IMAGE"
+      && error.status === 422
+      && error.details[0].inputClassification.type === "not_geometry"
+    ),
+  );
+});
+
 test("analyzer uses an injected parser and maps response into the existing draft schema", async () => {
   const fixture = validateAndNormalizeGeometryParserResponse(createQuickGeometryParserFixture());
   let receivedFile = null;
@@ -272,11 +331,12 @@ test("analyzer uses an injected parser and maps response into the existing draft
   const file = createPngFile();
   const draft = await analyzeGeometryImage(file, { parserClient });
   assert.strictEqual(receivedFile, file);
-  assert.deepEqual(Object.keys(draft.sizes), ["430"]);
+  assert.deepEqual(Object.keys(draft.sizes), QUICK_SIZES);
   assert.deepEqual(Object.keys(draft.candidateSizes), QUICK_SIZES);
-  assert.deepEqual(draft.selectedImportSizes, ["430"]);
+  assert.deepEqual(draft.selectedImportSizes, QUICK_SIZES);
   assert.equal(draft.candidateSizes["550"].stack, 610.6);
   assert.equal(draft.selectedSize, "430");
+  assert.equal(draft.category, null);
   assert.equal(draft.parserWarnings.length, 0);
   assert.doesNotMatch(analyzerSource, /createMockGeometryImportDraft|mockGeometryImport/);
 });
@@ -318,7 +378,7 @@ test("qwen provider requires DASHSCOPE_API_KEY without making a request", async 
 });
 
 test("qwen provider sends image bytes in non-thinking JSON Object mode", async () => {
-  const fixture = createQuickGeometryParserFixture();
+  const fixture = createQuickGeometryParserRawTableFixture();
   let providerRequest = null;
   const provider = getGeometryProvider(QWEN_TEST_ENV, {
     fetchImpl: async (url, options) => {
@@ -339,6 +399,7 @@ test("qwen provider sends image bytes in non-thinking JSON Object mode", async (
   assert.deepEqual(providerRequest.body.response_format, { type: "json_object" });
   assert.match(providerRequest.body.messages[0].content[0].text, /valid JSON Object/);
   assert.match(providerRequest.body.messages[0].content[0].text, /rawRows/);
+  assert.match(providerRequest.body.messages[1].content[1].text, /Classify this image first/);
   assert.match(providerRequest.body.messages[1].content[0].image_url.url, /^data:image\/png;base64,/);
   assert.deepEqual(result.structuredOutput.detectedSizes, QUICK_SIZES);
   assert.equal(result.meta.provider, "qwen");
@@ -437,14 +498,34 @@ test("worker validates an injected fixture provider result without network acces
   assert.equal(payload.detectedSizeCount, 5);
   assert.deepEqual(payload.detectedSizes, QUICK_SIZES);
   assert.equal(payload.meta.provider, "fixture");
-  assert.equal(payload.meta.parserProtocolVersion, "raw-table-v1");
+  assert.equal(payload.meta.parserProtocolVersion, "raw-table-v2-classified");
+});
+
+test("road-bike classification enters Raw Table mapping with one provider request", async () => {
+  let providerCalls = 0;
+  const response = await requestQwenFixture(createQuickGeometryParserRawTableFixture(), {
+    onParse: () => { providerCalls += 1; },
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(providerCalls, 1);
+  assert.equal(payload.inputClassification.type, "road_bike_geometry");
+  assert.deepEqual(payload.detectedSizes, QUICK_SIZES);
+  assert.equal(payload.sizes[0].geometry.wheelbase, 986);
 });
 
 test("qwen rejects normalized output that omits required rawRows", async () => {
   const worker = createGeometryParserWorker({
     providerResolver: () => ({
       async parse() {
-        return { structuredOutput: createQuickGeometryParserFixture(), meta: { provider: "qwen" } };
+        return {
+          structuredOutput: {
+            ...createQuickGeometryParserFixture(),
+            inputClassification: createInputClassification("road_bike_geometry"),
+          },
+          meta: { provider: "qwen" },
+        };
       },
     }),
   });
@@ -467,7 +548,12 @@ test("qwen rejects an empty raw table before deterministic mapping", async () =>
     providerResolver: () => ({
       async parse() {
         return {
-          structuredOutput: { detectedSizeCount: 5, detectedSizes: QUICK_SIZES, rawRows: [] },
+          structuredOutput: {
+            inputClassification: createInputClassification("road_bike_geometry"),
+            detectedSizeCount: 5,
+            detectedSizes: QUICK_SIZES,
+            rawRows: [],
+          },
           meta: { provider: "qwen" },
         };
       },
@@ -483,6 +569,61 @@ test("qwen rejects an empty raw table before deterministic mapping", async () =>
 
   assert.equal(response.status, 422);
   assert.equal(payload.error.code, "RAW_TABLE_REQUIRED");
+});
+
+test("not-geometry classification returns NOT_GEOMETRY_IMAGE without requiring rawRows", async () => {
+  const response = await requestQwenFixture({
+    inputClassification: createInputClassification("not_geometry", {
+      reason: "The image is a resume screenshot without a geometry table.",
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "NOT_GEOMETRY_IMAGE");
+  assert.equal(payload.error.details[0].inputClassification.type, "not_geometry");
+  assert.doesNotMatch(payload.error.code, /RAW_TABLE/);
+});
+
+test("unsupported bicycle classification returns UNSUPPORTED_BIKE_TYPE", async () => {
+  const response = await requestQwenFixture({
+    inputClassification: createInputClassification("unsupported_bike_geometry", {
+      detectedBikeType: "mountain bike",
+      reason: "The table is for an MTB frame.",
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "UNSUPPORTED_BIKE_TYPE");
+  assert.equal(payload.error.details[0].inputClassification.detectedBikeType, "mountain bike");
+});
+
+test("unreadable classification returns GEOMETRY_IMAGE_UNREADABLE", async () => {
+  const response = await requestQwenFixture({
+    inputClassification: createInputClassification("unreadable", {
+      confidence: 0.61,
+      reason: "The size columns are severely cropped.",
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "GEOMETRY_IMAGE_UNREADABLE");
+});
+
+test("an ordinary bicycle photo without a Geometry table remains not_geometry", async () => {
+  const response = await requestQwenFixture({
+    inputClassification: createInputClassification("not_geometry", {
+      detectedBikeType: "road bicycle photo",
+      reason: "A bicycle is visible, but there are no size columns or Geometry parameters.",
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "NOT_GEOMETRY_IMAGE");
+  assert.match(payload.error.details[0].inputClassification.reason, /no size columns or Geometry parameters/);
 });
 
 test("qwen rejects raw rows whose value count does not match the detected sizes", async () => {
@@ -536,6 +677,8 @@ test("worker requests raw table extraction and maps source labels deterministica
   assert.equal(response.status, 200);
   assert.equal(receivedSchema, GEOMETRY_PARSER_RAW_TABLE_SCHEMA);
   assert.match(receivedPrompt, /rawRows/);
+  assert.match(receivedPrompt, /The presence of a bicycle alone is never enough/);
+  assert.match(receivedPrompt, /gravel/);
   assert.match(receivedPrompt, /preserve the source label text/);
   assert.match(receivedPrompt, /Do not infer a row's meaning from diagram letters/);
 });
@@ -607,10 +750,15 @@ test("worker ignores model-reported field counts and returns its own recomputati
 test("draft adapter preserves official size strings and parser warnings", () => {
   const fixture = validateAndNormalizeGeometryParserResponse(createQuickGeometryParserFixture());
   fixture.warnings.push({ code: "TEST", message: "550 尺码 Stack 未可靠识别。", field: "stack", size: "550" });
-  const draft = geometryParserResponseToDraft(fixture);
-  assert.deepEqual(Object.keys(draft.sizes), ["430"]);
+  let draft = geometryParserResponseToDraft(fixture);
+  assert.deepEqual(Object.keys(draft.sizes), QUICK_SIZES);
   assert.deepEqual(Object.keys(draft.candidateSizes), QUICK_SIZES);
+  assert.deepEqual(draft.selectedImportSizes, QUICK_SIZES);
   assert.equal(draft.detectedSizeCount, 5);
-  assert.equal(draft.parserWarnings.length, 0);
+  assert.equal(draft.parserWarnings.length, 1);
   assert.equal(draft.allParserWarnings[0].size, "550");
+  draft = toggleGeometryImportSize(draft, "550");
+  assert.deepEqual(draft.selectedImportSizes, ["430", "460", "490", "520"]);
+  assert.equal(draft.parserWarnings.length, 0);
+  assert.equal(draft.allParserWarnings.length, 1);
 });

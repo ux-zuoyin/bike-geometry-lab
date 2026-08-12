@@ -107,7 +107,7 @@ export function createQwenGeometryProvider({ env = {}, fetchImpl = globalThis.fe
                   },
                   {
                     type: "text",
-                    text: "Extract the complete bicycle geometry table from this image and return only the requested JSON Object.",
+                    text: "Classify this image first. Only if it is a supported official road-bike geometry table, extract every raw table row. Return only the requested JSON Object.",
                   },
                 ],
               },
@@ -163,4 +163,3 @@ export function createQwenGeometryProvider({ env = {}, fetchImpl = globalThis.fe
     },
   };
 }
-

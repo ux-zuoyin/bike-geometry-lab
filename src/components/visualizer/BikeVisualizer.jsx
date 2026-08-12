@@ -112,7 +112,7 @@ export function BikeVisualizer({
   });
   const renderBikes = stagePreviewBike
     ? [stagePreviewBike]
-    : (geometryImportMode ? [] : (bikes.length ? bikes : [demoBike]));
+    : (geometryImportMode ? [] : (presetExperienceMode ? [demoBike] : (bikes.length ? bikes : [demoBike])));
   const safeActiveIndex = activeBikeIndex != null && renderBikes[activeBikeIndex] ? activeBikeIndex : 0;
   const firstModel = useBikeRenderModel(renderBikes[0]);
   const secondModel = useBikeRenderModel(renderBikes[1] ?? renderBikes[0]);

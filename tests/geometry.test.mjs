@@ -175,6 +175,12 @@ import {
 } from "../src/state/workspaceBikes.js";
 import { createMockGeometryImportDraft } from "../src/data/mockGeometryImport.js";
 import { WELCOME_COMPLETED_STORAGE_KEY } from "../src/config/welcomePersistence.js";
+import {
+  WORKSPACE_ENTRY_MODE,
+  WORKSPACE_ENTRY_MODE_OPTIONS,
+  getWorkspaceEntryModeLabel,
+  hasUnfinishedGeometryTask,
+} from "../src/state/workspaceEntryMode.js";
 
 const identityMatrixError = (matrix) => Math.max(
   Math.abs(matrix.a - 1),
@@ -872,7 +878,7 @@ test("workspace bikes keep Geometry, Fit Setup, and Components independent", () 
   assert.match(appSource, /const \[activeBikeIndex, setActiveBikeIndex\] = useState\(null\)/);
   assert.match(appSource, /const \[compareEnabled, setCompareEnabled\] = useState\(false\)/);
   assert.match(appSource, /persistBikeSetup\(getPersistableBikeSetup\(bikes\[0\]\)\)/);
-  assert.match(appSource, /<BikeVisualizer[\s\S]*bikes=\{bikes\}[\s\S]*activeBikeIndex=\{isGeometryImportActive \? null : activeBikeIndex\}[\s\S]*stagePreviewBike=\{isGeometryImportActive \? importPreviewBike : null\}[\s\S]*frameOnly=\{isGeometryImportActive\}[\s\S]*compareEnabled=\{compareEnabled\}/);
+  assert.match(appSource, /<BikeVisualizer[\s\S]*bikes=\{bikes\}[\s\S]*activeBikeIndex=\{isGeometryWorkspaceActive \? null : activeBikeIndex\}[\s\S]*stagePreviewBike=\{isGeometryImportActive \? importPreviewBike : null\}[\s\S]*frameOnly=\{isGeometryWorkspaceActive\}[\s\S]*compareEnabled=\{compareEnabled\}/);
   assert.doesNotMatch(appSource + bikeVisualizerSource, /viewMode|compareFocus/);
   assert.match(dualBikeControlsSource, /role="group" aria-label="当前车型"/);
   assert.match(dualBikeControlsSource, /type="checkbox"[\s\S]*checked=\{compareEnabled\}/);
@@ -968,12 +974,12 @@ test("Preset Experience keeps three fixed-category QUICK bikes independent", () 
 
 test("zero-bike Welcome Gate opens the three-category Preset Experience", () => {
   assert.equal(WELCOME_COMPLETED_STORAGE_KEY, "bikeGeometryLabWelcomeCompleted");
-  assert.match(appSource, /const showWelcomeGate = bikes\.length === 0 && !isPresetExperienceMode && geometryImportStatus === "ready"/);
+  assert.match(appSource, /const showWelcomeGate = !hasEnteredWorkspace && bikes\.length === 0 && geometryImportStatus === "ready"/);
   assert.match(appSource, /const \[geometryImportStatus, setGeometryImportStatus\] = useState\("ready"\)/);
-  assert.match(appSource, /<main[\s\S]*className=\{`workspace[\s\S]*inert=\{showWelcomeGate \|\| pendingPresetComparisonBike \? true : undefined\}/);
+  assert.match(appSource, /<main[\s\S]*className=\{`workspace[\s\S]*inert=\{showWelcomeGate \|\| pendingPresetComparisonBike \|\| pendingWorkspaceMode \? true : undefined\}/);
   assert.match(appSource, /\{showWelcomeGate && <WelcomeGate onStartPresetExperience=\{startPresetExperience\} onSelectImage=\{selectWelcomeImage\} onManualEntry=\{startManualGeometryImport\} \/>\}/);
   assert.match(appSource, /createPresetExperiencePack\(initialSetup\)/);
-  assert.match(appSource, /const startPresetExperience = \(\) => \{[\s\S]*setActivePresetBikeId\(DEFAULT_PRESET_BIKE_ID\);[\s\S]*setIsPresetExperienceMode\(true\);[\s\S]*setActiveBikeIndex\(null\)/);
+  assert.match(appSource, /const startPresetExperience = \(\) => \{[\s\S]*setWorkspaceEntryMode\(WORKSPACE_ENTRY_MODE\.PRESET\);[\s\S]*setActivePresetBikeId\(DEFAULT_PRESET_BIKE_ID\);[\s\S]*setIsPresetExperienceMode\(true\)/);
   assert.match(appSource, /const selectWelcomeImage = \(file\) => \{[\s\S]*const operation = \{ type: "add", targetIndex: null \};[\s\S]*selectGeometryImage\(file, operation\)/);
   assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
 
@@ -992,6 +998,36 @@ test("zero-bike Welcome Gate opens the three-category Preset Experience", () => 
   assert.doesNotMatch(appSource + welcomeGateSource, /loginModal|Login|Register|登录|注册/);
 });
 
+test("Workspace entry modes remain a global layer above Preset bike selection and protect unfinished drafts", () => {
+  assert.deepEqual(WORKSPACE_ENTRY_MODE, {
+    PRESET: "preset",
+    UPLOAD: "upload",
+    MANUAL: "manual",
+  });
+  assert.deepEqual(WORKSPACE_ENTRY_MODE_OPTIONS.map(({ value, label }) => [value, label]), [
+    ["preset", "快速体验"],
+    ["upload", "上传几何图"],
+    ["manual", "手动录入"],
+  ]);
+  assert.equal(getWorkspaceEntryModeLabel("upload"), "上传几何图");
+  assert.equal(hasUnfinishedGeometryTask("ready"), false);
+  for (const status of ["analyzing", "review", "error"]) assert.equal(hasUnfinishedGeometryTask(status), true);
+
+  assert.match(appSource, /const \[workspaceEntryMode, setWorkspaceEntryMode\] = useState\(WORKSPACE_ENTRY_MODE\.PRESET\)/);
+  assert.match(appSource, /const \[pendingWorkspaceMode, setPendingWorkspaceMode\] = useState\(null\)/);
+  assert.match(appSource, /showWorkspaceModeNavigation = hasEnteredWorkspace && !isStageFullscreen/);
+  assert.match(appSource, /<WorkspaceModeNavigation value=\{workspaceEntryMode\} onChange=\{requestWorkspaceModeChange\} \/>/);
+  assert.match(appSource, /hasUnfinishedGeometryTask\(geometryImportStatus\)[\s\S]*setPendingWorkspaceMode\(nextMode\)/);
+  assert.match(appSource, /<WorkspaceModeConfirmModal[\s\S]*targetMode=\{pendingWorkspaceMode\}[\s\S]*onConfirm=\{confirmWorkspaceModeChange\}/);
+  assert.match(appSource, /setWorkspaceEntryMode\(WORKSPACE_ENTRY_MODE\.UPLOAD\)[\s\S]*setWorkspaceTaskMode\(WORKSPACE_ENTRY_MODE\.UPLOAD\)/);
+  assert.match(appSource, /setWorkspaceEntryMode\(WORKSPACE_ENTRY_MODE\.MANUAL\)[\s\S]*setWorkspaceTaskMode\(WORKSPACE_ENTRY_MODE\.MANUAL\)/);
+  assert.match(bikeVisualizerSource, /presetExperienceMode \? \[demoBike\]/);
+  assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*64px;[^}]*align-items:\s*stretch;[^}]*justify-self:\s*center/s);
+  assert.match(stylesSource, /\.workspace-mode-nav__items\s*\{[^}]*height:\s*64px;[^}]*gap:\s*28px/s);
+  assert.match(stylesSource, /\.workspace-mode-nav__items button\.is-selected\s*\{[^}]*background:\s*transparent;[^}]*color:\s*#65A0FF/s);
+  assert.doesNotMatch(stylesSource, /\.site-header--with-mode-nav|\.workspace\.workspace--with-mode-nav|calc\(100vh - 108px\)/);
+});
+
 test("manual Geometry entry bypasses image parsing and shares the import draft pipeline", () => {
   const manualEntrySource = appSource.match(/const startManualGeometryImport = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
   assert.match(manualEntrySource, /createManualGeometryImportDraft\(\)/);
@@ -1005,7 +1041,8 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
   assert.deepEqual(emptyDraft.rawRows, []);
   assert.deepEqual(emptyDraft.parserWarnings, []);
   assert.equal(validateGeometryImportDraft(emptyDraft).firstErrorKey, "brand");
-  assert.equal(emptyDraft.category, "endurance");
+  assert.equal(emptyDraft.category, null);
+  assert.equal(validateGeometryImportDraft({ ...emptyDraft, brand: "Test" }).firstErrorKey, "category");
   assert.equal(validateGeometryImportDraft({ ...emptyDraft, brand: "Test", category: "unknown" }).firstErrorKey, "category");
 
   let draft = renameGeometryImportDraftSize(emptyDraft, "54");
@@ -1076,14 +1113,21 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
 
   const draft = createMockGeometryImportDraft();
   const secondDraft = createMockGeometryImportDraft();
-  assert.deepEqual(Object.keys(draft.sizes), ["54"]);
+  assert.deepEqual(Object.keys(draft.sizes), ["49", "52", "54", "56"]);
   assert.deepEqual(Object.keys(draft.candidateSizes), ["49", "52", "54", "56"]);
-  assert.deepEqual(draft.selectedImportSizes, ["54"]);
+  assert.deepEqual(draft.selectedImportSizes, ["49", "52", "54", "56"]);
   assert.equal(draft.selectedSize, "54");
-  assert.equal(draft.category, "endurance");
+  assert.equal(draft.category, null);
   assert.equal(draft.brand, "");
   assert.equal(draft.model, "");
   assert.notStrictEqual(draft.sizes[54], secondDraft.sizes[54]);
+
+  const withoutActiveSize = toggleGeometryImportSize(draft, "54");
+  assert.deepEqual(withoutActiveSize.selectedImportSizes, ["49", "52", "56"]);
+  assert.equal(withoutActiveSize.selectedSize, "56");
+  const withoutLastSize = toggleGeometryImportSize(withoutActiveSize, "56");
+  assert.deepEqual(withoutLastSize.selectedImportSizes, ["49", "52"]);
+  assert.equal(withoutLastSize.selectedSize, "52");
 
   const orderGeometry = { ...draft.candidateSizes[54] };
   let clickOrderedDraft = {
@@ -1100,12 +1144,18 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.deepEqual(clickOrderedDraft.selectedImportSizes, ["44", "49", "52", "54", "61"]);
   assert.deepEqual(Object.keys(clickOrderedDraft.sizes), ["44", "49", "52", "54", "61"]);
 
-  const edited = updateGeometryImportDraftField(draft, "54", "stack", "582");
+  let only54Draft = draft;
+  for (const size of ["49", "52", "56"]) only54Draft = toggleGeometryImportSize(only54Draft, size);
+  assert.deepEqual(only54Draft.selectedImportSizes, ["54"]);
+  assert.strictEqual(toggleGeometryImportSize(only54Draft, "54"), only54Draft);
+
+  const edited = updateGeometryImportDraftField(only54Draft, "54", "stack", "582");
   assert.equal(edited.sizes[54].stack, 582);
-  assert.equal(draft.sizes[54].stack, 575);
-  const identified = { ...edited, brand: "Quick", model: "Zeitpro" };
+  assert.equal(only54Draft.sizes[54].stack, 575);
+  const identified = { ...edited, brand: "Quick", model: "Zeitpro", category: "endurance" };
   assert.equal(validateGeometryImportDraft(identified).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, model: "" }).isValid, true);
+  assert.equal(validateGeometryImportDraft({ ...identified, selectedImportSizes: [], sizes: {} }).firstErrorKey, "sizes");
   const withAdjacentSize = toggleGeometryImportSize(identified, "49");
   assert.deepEqual(withAdjacentSize.selectedImportSizes, ["49", "54"]);
   assert.equal(withAdjacentSize.selectedSize, "49");
@@ -1176,6 +1226,11 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.doesNotMatch(geometryImportFlowSource, /图片已选择|分析几何数据/);
   assert.match(geometryImportFlowSource, /AI 正在初步提取几何数据…/);
   assert.match(geometryImportFlowSource, /AI 初步提取结果，请逐项核对/);
+  assert.match(geometryImportFlowSource, /当前仅支持公路车官方几何表：耐力型 \/ 综合型 \/ 破风型/);
+  assert.match(geometryImportFlowSource, /NOT_GEOMETRY_IMAGE:[\s\S]*这似乎不是车架几何图/);
+  assert.match(geometryImportFlowSource, /UNSUPPORTED_BIKE_TYPE:[\s\S]*当前暂不支持这种车型/);
+  assert.match(geometryImportFlowSource, /GEOMETRY_IMAGE_UNREADABLE:[\s\S]*暂时无法读取这张几何图/);
+  assert.match(appSource, /errorCode: geometryImportErrorCode/);
   assert.match(geometryImportFlowSource, /补充尺码/);
   assert.match(geometryImportFlowSource, /确认生成车架/);
   assert.match(geometryImportFlowSource, /geometry-import__review-buttons[\s\S]*>取消<[\s\S]*确认生成车架/);
@@ -1183,7 +1238,11 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.match(geometryImportFlowSource, /data-validation-key=\{errorKey\}[\s\S]*aria-describedby=\{error \? errorId/);
   assert.match(geometryImportFlowSource, /scrollContainer\.scrollTo\(\{[\s\S]*behavior: "smooth"/);
   assert.match(geometryImportFlowSource, /target\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(geometryImportFlowSource, /message: `还有 \$\{validation\?\.errorCount \?\? 1\} 项关键几何数据需要补充`/);
+  assert.match(geometryImportFlowSource, /message: `还有 \$\{validation\?\.errorCount \?\? 1\} 项必填信息需要补充`/);
+  assert.match(geometryImportFlowSource, /默认全部导入，可取消不需要的尺码/);
+  assert.match(geometryImportFlowSource, /至少保留一个尺码/);
+  assert.match(geometryImportFlowSource, /data-validation-key="category"[\s\S]*tabIndex=\{error \? -1 : undefined\}/);
+  assert.match(appSource, /const draftPreviewValid = Boolean\(geometryImportDraft\?\.category\)/);
   assert.match(stylesSource, /input\[aria-invalid="true"\]:focus\s*\{[^}]*status-error/);
   assert.match(bikeVisualizerSource, /showContactPoints=\{!frameOnly\}[\s\S]*frameOnly=\{frameOnly\}/);
   assert.match(enduranceTemplateSource, /\{!frameOnly && <>[\s\S]*renderLayer="non-drive-crank"[\s\S]*data-render-layer="cockpit"[\s\S]*<TemplateAsset asset=\{forkAsset\}/);
@@ -1192,11 +1251,11 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.match(appSource, /const GEOMETRY_PREVIEW_COLOR = "#E5E7EB"/);
   assert.match(appSource, /createBikeFromGeometryImport\(\{ \.\.\.workspaceBike, id: "geometry-import-preview" \}, geometryImportDraft, geometryImportImage\)/);
   assert.match(appSource, /frameColor: GEOMETRY_PREVIEW_COLOR,[\s\S]*forkColor: GEOMETRY_PREVIEW_COLOR/);
-  assert.match(appSource, /activeBikeIndex=\{isGeometryImportActive \? null : activeBikeIndex\}/);
-  assert.match(appSource, /isStageFullscreen=\{isStageFullscreen \|\| isGeometryImportActive\}/);
+  assert.match(appSource, /activeBikeIndex=\{isGeometryWorkspaceActive \? null : activeBikeIndex\}/);
+  assert.match(appSource, /isStageFullscreen=\{isStageFullscreen \|\| isGeometryWorkspaceActive\}/);
   assert.match(bikeVisualizerSource, /geometryImportMode \? \([\s\S]*Geometry Preview[\s\S]*<DualBikeControls/);
   assert.match(appSource, /const importPreviewSourceBike = isGeometryImportActive && draftPreviewValid[\s\S]*: null;/);
-  assert.match(bikeVisualizerSource, /geometryImportMode \? \[\] : \(bikes\.length \? bikes : \[demoBike\]\)/);
+  assert.match(bikeVisualizerSource, /geometryImportMode \? \[\] : \(presetExperienceMode \? \[demoBike\] : \(bikes\.length \? bikes : \[demoBike\]\)\)/);
   assert.match(bikeVisualizerSource, /geometry-preview-empty[\s\S]*部分几何数据需要确认[\s\S]*previewIncompleteMessage/);
   assert.match(bikeVisualizerSource, /\{!geometryImportMode && hasRenderablePreview && <g[\s\S]*className="bike-reflection"/);
   assert.match(bikeVisualizerSource, /GeometryPreviewReference point=\{data\.frame\.bb\} label="BB"[\s\S]*label="Rear Axle"[\s\S]*label="Front Axle"/);
@@ -1302,10 +1361,14 @@ test("the workspace keeps Frame, Bike Visualizer, and Bike Setup visible without
   assert.doesNotMatch(appSource, /isSetupPanelOpen|隐藏设定|显示设定|aria-label="关于"|aria-label="帮助"/);
   assert.doesNotMatch(appSource, /className="topbar"|className="brand"|className="topbar-context"|公路车几何设定首页|当前车型/);
   assert.match(appSource, /import brandLogo from "\.\/assets\/brand\/logo_bai\.png"/);
-  assert.match(appSource, /<header className="site-header">[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<\/header>/);
-  assert.match(stylesSource, /\.site-header\s*\{[^}]*height:\s*64px;[^}]*border:\s*0;[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
-  assert.match(stylesSource, /\.site-header__logo\s*\{[^}]*height:\s*36px;[^}]*object-fit:\s*contain;/s);
+  assert.match(appSource, /<header className="site-header"[\s\S]*<div className="site-header__brand-row">[\s\S]*<img className="site-header__logo" src=\{brandLogo\} alt="Bike Geometry Lab" \/>[\s\S]*<WorkspaceModeNavigation[\s\S]*<span className="site-header__copyright">©Design By Sardine<\/span>[\s\S]*<\/div>[\s\S]*<\/header>/);
+  assert.match(stylesSource, /\.site-header\s*\{[^}]*height:\s*64px;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*var\(--side-card-glass-bg\);[^}]*backdrop-filter:\s*var\(--card-glass-filter\);[^}]*-webkit-backdrop-filter:\s*var\(--card-glass-filter\);/s);
+  assert.match(stylesSource, /\.site-header__brand-row\s*\{[^}]*height:\s*64px;[^}]*padding:\s*0 20px;[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\);[^}]*align-items:\s*center/s);
+  assert.match(stylesSource, /\.site-header__logo\s*\{[^}]*height:\s*36px;[^}]*object-fit:\s*contain;[^}]*justify-self:\s*start;/s);
+  assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*64px;[^}]*justify-self:\s*center;/s);
+  assert.match(stylesSource, /\.site-header__copyright\s*\{[^}]*justify-self:\s*end;[^}]*font-size:\s*var\(--font-size-xs\);[^}]*white-space:\s*nowrap;/s);
   assert.match(stylesSource, /\.workspace\s*\{[^}]*height:\s*calc\(100vh - 64px\);[^}]*min-height:\s*656px;/s);
+  assert.doesNotMatch(appSource, /workspace--with-mode-nav|site-header--with-mode-nav/);
   assert.doesNotMatch(stylesSource, /\.topbar(?:\s|\.|\{|,)|\.brand(?:\s|\.|\{|,)|\.topbar-context(?:\s|\.|\{|,)|calc\(100vh\s*-\s*(?:68px|56px)\)/);
 });
 

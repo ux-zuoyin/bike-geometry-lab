@@ -4,6 +4,12 @@ const valuesFor = (field) => QUICK_SIZES.map((size) => QUICK_GEOMETRY[size][fiel
 
 export function createQuickGeometryParserRawTableFixture() {
   return {
+    inputClassification: {
+      type: "road_bike_geometry",
+      confidence: 0.99,
+      detectedBikeType: "road bike",
+      reason: "The image contains a complete official road-bike geometry table with size columns and geometry parameters.",
+    },
     detectedSizeCount: QUICK_SIZES.length,
     detectedSizes: [...QUICK_SIZES],
     rawRows: [

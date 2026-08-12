@@ -1,4 +1,7 @@
-import { GEOMETRY_PARSER_RAW_TABLE_SCHEMA } from "../src/services/geometryParserSchema.js";
+import {
+  GEOMETRY_PARSER_INPUT_TYPES,
+  GEOMETRY_PARSER_RAW_TABLE_SCHEMA,
+} from "../src/services/geometryParserSchema.js";
 import {
   GeometryParserValidationError,
   validateAndNormalizeGeometryParserResponse,
@@ -8,10 +11,18 @@ import { getGeometryProvider } from "./providers/geometryProviderRegistry.js";
 
 const PARSER_PATH = "/api/geometry/parse";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const PARSER_PROTOCOL_VERSION = "raw-table-v1";
+const PARSER_PROTOCOL_VERSION = "raw-table-v2-classified";
 
-const SYSTEM_PROMPT = `You extract bicycle frame geometry tables from official product images.
+const SYSTEM_PROMPT = `You classify and extract bicycle frame geometry tables from product images in one request.
 Read the image itself. Do not use the filename, brand assumptions, known-bike memory, presets, or guessed fallback values.
+First classify the complete input into exactly one inputClassification.type:
+- road_bike_geometry: a real official road-bike Geometry / frame-geometry table for an Endurance, All-Round, or Aero road bike.
+- unsupported_bike_geometry: bicycle geometry content for a clearly unsupported category, including MTB, gravel, folding, city, step-through/lady, BMX, kids, or another non-road-bike category.
+- not_geometry: not a geometry table, including an ordinary photo, person, resume, chat/text screenshot, marketing image, unrelated image, or a bicycle photo without a readable geometry data table.
+- unreadable: likely a geometry table, but resolution, blur, severe cropping, or missing size/parameter regions prevents reliable extraction.
+Use the whole-image meaning plus visible size columns and typical Geometry parameters such as Stack, Reach, Seat Tube, and Head Tube. The presence of a bicycle alone is never enough for road_bike_geometry.
+Return classification confidence from 0 to 1 when reliable, otherwise null. detectedBikeType and reason are optional diagnostic strings and must be null when unknown.
+Only when inputClassification.type is road_bike_geometry, continue with the raw geometry table extraction below. For every other classification, do not invent sizes, rows, or geometry values; raw table fields may be omitted.
 The image may contain multiple frame-size columns. Find the complete geometry table, determine whether sizes are rows or columns, and identify every size.
 Preserve every official size label exactly as printed and in source order. Never shorten, normalize, convert, or reinterpret a size label.
 Return the raw geometry table, not an interpretation into another schema. rawRows must include every detected source row, including rows whose meaning is uncertain or not useful to a bicycle renderer.
@@ -61,6 +72,55 @@ function errorPayload(code, message, details = []) {
 
 function isQwenProvider(env) {
   return String(env.GEOMETRY_PARSER_PROVIDER ?? "").trim().toLowerCase() === "qwen";
+}
+
+const inputClassificationTypes = new Set(GEOMETRY_PARSER_INPUT_TYPES);
+
+function normalizeInputClassification(structuredOutput, { required = false } = {}) {
+  const value = structuredOutput?.inputClassification;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    if (!required) return null;
+    throw new GeometryParserValidationError("模型未返回输入图片类型判断，请重新识别。", {
+      code: "INPUT_CLASSIFICATION_REQUIRED",
+    });
+  }
+  const type = String(value.type ?? "").trim();
+  const confidence = value.confidence == null ? null : Number(value.confidence);
+  if (!inputClassificationTypes.has(type)
+    || (confidence != null && (!Number.isFinite(confidence) || confidence < 0 || confidence > 1))) {
+    throw new GeometryParserValidationError("模型返回的输入图片类型判断无效，请重新识别。", {
+      code: "INPUT_CLASSIFICATION_INVALID",
+    });
+  }
+  return {
+    type,
+    confidence,
+    detectedBikeType: value.detectedBikeType == null ? null : String(value.detectedBikeType).trim() || null,
+    reason: value.reason == null ? null : String(value.reason).trim() || null,
+  };
+}
+
+function rejectUnsupportedInput(classification) {
+  const errorsByType = {
+    not_geometry: {
+      code: "NOT_GEOMETRY_IMAGE",
+      message: "这似乎不是车架几何图，请上传包含尺码与 Geometry 参数的公路车官方几何表。",
+    },
+    unsupported_bike_geometry: {
+      code: "UNSUPPORTED_BIKE_TYPE",
+      message: "当前暂不支持这种车型。Bike Geometry Lab 目前仅支持耐力、综合和破风三类公路车几何。",
+    },
+    unreadable: {
+      code: "GEOMETRY_IMAGE_UNREADABLE",
+      message: "暂时无法可靠读取这张几何图，请上传更清晰、完整的官方几何表。",
+    },
+  };
+  const businessError = errorsByType[classification?.type];
+  if (!businessError) return;
+  throw new GeometryParserValidationError(businessError.message, {
+    code: businessError.code,
+    details: [{ inputClassification: classification }],
+  });
 }
 
 function requireRawGeometryTable(structuredOutput) {
@@ -164,11 +224,19 @@ export function createGeometryParserWorker({
       }
 
       try {
-        if (isQwenProvider(env)) requireRawGeometryTable(providerResult?.structuredOutput);
+        const qwenProvider = isQwenProvider(env);
+        const inputClassification = normalizeInputClassification(providerResult?.structuredOutput, {
+          required: qwenProvider,
+        });
+        if (inputClassification) rejectUnsupportedInput(inputClassification);
+        if (qwenProvider && inputClassification?.type === "road_bike_geometry") {
+          requireRawGeometryTable(providerResult?.structuredOutput);
+        }
         const mappedResponse = mapRawGeometryTableToParserResponse(providerResult?.structuredOutput);
         const validated = validateAndNormalizeGeometryParserResponse(mappedResponse);
         return jsonResponse({
           ...validated,
+          ...(inputClassification ? { inputClassification } : {}),
           meta: {
             ...(providerResult?.meta && typeof providerResult.meta === "object" ? providerResult.meta : {}),
             parserProtocolVersion: PARSER_PROTOCOL_VERSION,
