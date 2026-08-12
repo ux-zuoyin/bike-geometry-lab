@@ -7,7 +7,7 @@ import { BikeSeatpost } from "./BikeSeatpost.jsx";
 import { BikeSaddle } from "./BikeSaddle.jsx";
 import { BikeCrankset } from "./BikeCrankset.jsx";
 import { BikeDrivetrain } from "./BikeDrivetrain.jsx";
-import { EnduranceBikeTemplate } from "../../bike/templates/EnduranceBikeTemplate.jsx";
+import { RoadFrameRenderer } from "../../bike/templates/RoadFrameRenderer.jsx";
 
 export function RoadBikeVisual({
   data,
@@ -18,10 +18,11 @@ export function RoadBikeVisual({
   componentSetup,
   motionStopped = false,
   frameOnly = false,
+  seatStayStyle = "mid",
 }) {
-  if (preset.id === "endurance") {
+  if (preset.id === "endurance" || preset.id === "allRound" || preset.id === "aero") {
     return (
-      <EnduranceBikeTemplate
+      <RoadFrameRenderer
         data={data}
         project={project}
         showFigmaAnchors={showFigmaAnchors}
@@ -29,6 +30,11 @@ export function RoadBikeVisual({
         componentSetup={componentSetup}
         motionStopped={motionStopped}
         frameOnly={frameOnly}
+        seatStayStyle={seatStayStyle}
+        frameVisualPreset={preset.id}
+        topTubeStyle={preset.topTubeStyle}
+        topTubeFigmaNodeId={preset.topTubeFigmaNodeId}
+        downTubeStyle={preset.downTubeStyle}
       />
     );
   }

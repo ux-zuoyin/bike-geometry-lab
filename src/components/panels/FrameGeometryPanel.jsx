@@ -3,6 +3,7 @@ import { ColorPalette } from "../ui/ColorPalette.jsx";
 import { SegmentedControl } from "../ui/Stepper.jsx";
 import { GeometryImportFlow } from "../import/GeometryImportFlow.jsx";
 import { PanelSection } from "./PanelSection.jsx";
+import { sortBikeSizes } from "../../lib/geometry/sizeSorting.js";
 
 const GEOMETRY_LANGUAGE_STORAGE_KEY = "bike-geometry-lab:geometry-language";
 
@@ -20,8 +21,15 @@ const geometryDetails = [
 
 const displayGeometryValue = (value) => (value == null || value === "" ? "未识别" : value);
 
-export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, geometryImport, isStageFullscreen = false }) {
+const seatStayStyleOptions = Object.freeze([
+  { value: "low", label: "低" },
+  { value: "mid", label: "中" },
+  { value: "high", label: "高" },
+]);
+
+export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updateComponentSetup, geometryImport, isStageFullscreen = false }) {
   const sizeData = bike.sizeData;
+  const orderedSizes = sortBikeSizes(bike.sizes, { sourceOrder: bike.sizes });
   const isImportReady = geometryImport.status === "ready";
   const isManualImport = geometryImport.mode === "manual" || geometryImport.draft?.entryMode === "manual";
   const [geometryLanguage, setGeometryLanguage] = useState(() => {
@@ -70,7 +78,7 @@ export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, g
             </div>
           )}
         >
-          <article className="model-card is-selected" aria-label={`${bike.brand} ${bike.model} 耐力型，${bike.sizes.length} 个尺码`}>
+          <article className="model-card is-selected" aria-label={`${bike.brand} ${bike.model} ${bike.categoryLabel}，${bike.sizes.length} 个尺码`}>
             <div className="model-card__identity">
               <strong>{bike.brand} {bike.model}</strong>
               <span>{bike.categoryLabel}</span>
@@ -81,12 +89,22 @@ export function FrameGeometryPanel({ bike, setFrameSize, updateComponentSetup, g
 
         <PanelSection title="尺码" hint={`已选择 · ${bike.size}`} className="frame-size-section">
           <div className="size-selector-area">
-            <SegmentedControl className="size-selector-grid" options={bike.sizes} value={bike.size} onChange={setFrameSize} />
+            <SegmentedControl className="size-selector-grid" options={orderedSizes} value={bike.size} onChange={setFrameSize} />
           </div>
           <p className="section-note">切换尺码不会改变右侧骑行设定和配件选择。</p>
         </PanelSection>
 
         <PanelSection title="车架外观">
+          {bike.category !== "aero" && (
+            <div className="frame-structure-control">
+              <SegmentedControl
+                label="后上叉连接"
+                options={seatStayStyleOptions}
+                value={bike.seatStayStyle ?? "mid"}
+                onChange={setSeatStayStyle}
+              />
+            </div>
+          )}
           <div className="frame-appearance__palette">
             <ColorPalette
               label="车架颜色"

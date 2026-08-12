@@ -1,5 +1,6 @@
 import { productionGeometryParserClient } from "./geometryParserClient.js";
 import { scopeGeometryImportWarnings } from "../state/geometryImportState.js";
+import { DEFAULT_BIKE_CATEGORY } from "../config/bikeArchetypes.js";
 
 function createParserDiagnostics(response) {
   if (!import.meta.env?.DEV) return undefined;
@@ -42,7 +43,7 @@ export function geometryParserResponseToDraft(response) {
   const draft = {
     brand: "",
     model: "",
-    category: "endurance",
+    category: DEFAULT_BIKE_CATEGORY,
     sizes,
     candidateSizes,
     selectedImportSizes,

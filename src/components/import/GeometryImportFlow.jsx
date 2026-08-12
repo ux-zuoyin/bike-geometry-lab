@@ -1,8 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle, ImageSquare, Info, Plus, SpinnerGap, UploadSimple, WarningCircle } from "@phosphor-icons/react";
-import { GEOMETRY_IMPORT_FIELDS, getGeometryDraftSourceCounts, MANUAL_GEOMETRY_SIZE_PLACEHOLDER } from "../../state/geometryImportState.js";
+import { GEOMETRY_IMPORT_FIELDS, getGeometryDraftSourceCounts, getSelectedImportSizes, MANUAL_GEOMETRY_SIZE_PLACEHOLDER } from "../../state/geometryImportState.js";
+import { BIKE_CATEGORIES, getBikeCategoryLabel } from "../../config/bikeArchetypes.js";
+import { sortBikeSizes } from "../../lib/geometry/sizeSorting.js";
 
 const ACCEPTED_IMAGE_TYPES = ".png,.jpg,.jpeg,image/png,image/jpeg";
+
+function FrameCategorySelector({ value, error, onChange }) {
+  const errorId = "geometry-import-category-error";
+  return (
+    <div className={`geometry-import__category${error ? " has-error" : ""}`}>
+      <span>车架类型</span>
+      <div
+        className="geometry-import__category-options"
+        role="group"
+        aria-label="车架类型"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? errorId : undefined}
+        data-validation-key="category"
+        tabIndex={error ? -1 : undefined}
+      >
+        {BIKE_CATEGORIES.map((category) => (
+          <button
+            key={category}
+            type="button"
+            className={value === category ? "is-selected" : ""}
+            aria-pressed={value === category}
+            onClick={() => onChange(category)}
+          >
+            {getBikeCategoryLabel(category).replace("型", "架")}
+          </button>
+        ))}
+      </div>
+      <small>创建后作为车型固定属性，可在修改几何参数中调整。</small>
+      {error && <em id={errorId} role="alert">{error}</em>}
+    </div>
+  );
+}
 
 export function GeometryImagePicker({ onSelectImage, compact = false, label = "重新选择" }) {
   const inputRef = useRef(null);
@@ -83,8 +117,9 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
   const [errorNavigation, setErrorNavigation] = useState(null);
   const formRef = useRef(null);
   const submitAttemptRef = useRef(0);
-  const sizes = draft.selectedImportSizes?.filter((size) => draft.sizes[String(size)]) ?? Object.keys(draft.sizes);
-  const candidateSizes = draft.detectedSizes?.map(String) ?? Object.keys(draft.candidateSizes ?? draft.sizes);
+  const sizes = getSelectedImportSizes(draft).filter((size) => draft.sizes[String(size)]);
+  const candidateSizeSource = draft.detectedSizes?.map(String) ?? Object.keys(draft.candidateSizes ?? draft.sizes);
+  const candidateSizes = sortBikeSizes(candidateSizeSource, { sourceOrder: candidateSizeSource });
   const selectedGeometry = draft.sizes[draft.selectedSize] ?? {};
   const parserWarnings = Array.isArray(draft.parserWarnings) ? draft.parserWarnings : [];
   const detectedSizeCount = draft.detectedSizeCount ?? sizes.length;
@@ -161,7 +196,7 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
           <div className="geometry-import__identity-fields">
             <label><span>品牌名称</span><input data-validation-key="brand" type="text" value={draft.brand} placeholder="例如 Specialized" aria-invalid={Boolean(errors.brand)} aria-describedby={errors.brand ? "geometry-import-brand-error" : undefined} onChange={(event) => onDraftMetaChange("brand", event.target.value)} />{errors.brand && <small id="geometry-import-brand-error" role="alert">{errors.brand}</small>}</label>
             <label><span>车型名称 <small>选填</small></span><input type="text" value={draft.model} placeholder="未命名车型" onChange={(event) => onDraftMetaChange("model", event.target.value)} /></label>
-            <div className="geometry-import__category"><span>车架类型</span><strong>耐力型</strong><small>本阶段仅支持 Endurance</small></div>
+            <FrameCategorySelector value={draft.category} error={errors.category} onChange={(category) => onDraftMetaChange("category", category)} />
             <label><span>尺码名称</span><input data-validation-key="sizes" type="text" value={manualSizeName} placeholder="例如 54、430、S" aria-invalid={Boolean(errors.sizes)} aria-describedby={errors.sizes ? "geometry-import-sizes-error" : undefined} onChange={(event) => onManualSizeChange(event.target.value)} />{errors.sizes && <small id="geometry-import-sizes-error" role="alert">{errors.sizes}</small>}</label>
           </div>
           {sizes.length > 1 && <div className="geometry-import__selected-sizes size-selector-grid" role="group" aria-label="当前录入尺码">{sizes.map((size) => <button type="button" key={size} className={size === draft.selectedSize ? "is-selected" : ""} aria-pressed={size === draft.selectedSize} title={size} onClick={() => onSelectSize(size)}>{size === MANUAL_GEOMETRY_SIZE_PLACEHOLDER ? "待填写" : size}</button>)}</div>}
@@ -208,7 +243,7 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
         <div className="geometry-import__identity-fields">
           <label><span>品牌名称</span><input data-validation-key="brand" type="text" value={draft.brand} placeholder="例如 TREK" aria-invalid={Boolean(errors.brand)} aria-describedby={errors.brand ? "geometry-import-brand-error" : undefined} onChange={(event) => onDraftMetaChange("brand", event.target.value)} />{errors.brand && <small id="geometry-import-brand-error" role="alert">{errors.brand}</small>}</label>
           <label><span>车型名称 <small>选填</small></span><input type="text" value={draft.model} placeholder="未命名车型" onChange={(event) => onDraftMetaChange("model", event.target.value)} /></label>
-          <div className="geometry-import__category"><span>车架类型</span><strong>耐力型</strong><small>本阶段仅支持 Endurance</small></div>
+          <FrameCategorySelector value={draft.category} error={errors.category} onChange={(category) => onDraftMetaChange("category", category)} />
         </div>
       </section>
       <section className="geometry-import__block">

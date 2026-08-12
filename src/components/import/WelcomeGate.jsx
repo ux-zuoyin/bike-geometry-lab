@@ -8,7 +8,7 @@ import {
 
 const ACCEPTED_IMAGE_TYPES = ".png,.jpg,.jpeg,image/png,image/jpeg";
 
-export function WelcomeGate({ onUsePreset, onSelectImage, onManualEntry }) {
+export function WelcomeGate({ onStartPresetExperience, onSelectImage, onManualEntry }) {
   const inputRef = useRef(null);
 
   return (
@@ -31,12 +31,12 @@ export function WelcomeGate({ onUsePreset, onSelectImage, onManualEntry }) {
           <button
             type="button"
             className="welcome-choice welcome-choice--primary"
-            onClick={onUsePreset}
+            onClick={onStartPresetExperience}
           >
             <Bicycle size={34} weight="regular" aria-hidden="true" />
-            <span className="welcome-choice__eyebrow">使用预设车型体验</span>
-            <strong>TREK Domane</strong>
-            <small>立即体验几何、骑行设定与配件调整</small>
+            <span className="welcome-choice__eyebrow">Preset Experience</span>
+            <strong>三类车架快速体验</strong>
+            <small>体验耐力、综合、破风三种公路车几何与车架结构。</small>
             <ArrowRight className="welcome-choice__arrow" size={24} weight="regular" aria-hidden="true" />
           </button>
 
