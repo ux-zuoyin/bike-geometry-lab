@@ -1,4 +1,7 @@
-import { GEOMETRY_PARSER_PLAUSIBILITY_RANGES } from "../services/geometryParserSchema.js";
+import {
+  GEOMETRY_PARSER_LENGTH_FIELD_KEYS,
+  GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
+} from "../services/geometryParserSchema.js";
 import { ENDURANCE_VISUAL_BASE_GEOMETRY } from "../data/enduranceGeometry.js";
 import {
   BIKE_CATEGORIES,
@@ -67,6 +70,8 @@ export function createManualGeometryImportDraft() {
     parserConfirmationCount: 0,
     unrecognizedFields: [],
     parserMeta: null,
+    measurementContext: null,
+    unitDiagnostics: null,
   };
 }
 
@@ -92,8 +97,66 @@ export function getSelectedImportSizes(draft) {
 export function scopeGeometryImportWarnings(warnings, selectedImportSizes) {
   const selected = new Set((selectedImportSizes ?? []).map(toSize));
   return Array.isArray(warnings)
-    ? warnings.filter((warning) => warning?.size != null && selected.has(toSize(warning.size)))
+    ? warnings.filter((warning) => (
+      warning?.code === "UNIT_UNCERTAIN"
+      || (warning?.size != null && selected.has(toSize(warning.size)))
+    ))
     : [];
+}
+
+export function confirmGeometryImportLengthUnit(draft, rawUnit) {
+  const unit = rawUnit === "cm" || rawUnit === "mm" ? rawUnit : null;
+  if (!draft || !unit || !draft.measurementContext?.requiresConfirmation) return draft;
+
+  const diagnosticsByField = draft.unitDiagnostics?.fields ?? {};
+  const candidateSizes = Object.fromEntries(Object.entries(draft.candidateSizes ?? draft.sizes ?? {}).map(([size, geometry]) => {
+    const nextGeometry = { ...geometry };
+    for (const field of GEOMETRY_PARSER_LENGTH_FIELD_KEYS) {
+      const diagnostic = diagnosticsByField[field];
+      if (diagnostic?.sourceUnit !== "unknown") continue;
+      const sourceValue = diagnostic.values?.find((item) => String(item.size) === String(size))?.sourceValue;
+      if (!Number.isFinite(Number(sourceValue))) continue;
+      nextGeometry[field] = unit === "cm" ? Number(sourceValue) * 10 : Number(sourceValue);
+    }
+    return [size, nextGeometry];
+  }));
+  const unitDiagnostics = draft.unitDiagnostics ? {
+    ...draft.unitDiagnostics,
+    defaultLengthUnit: unit,
+    unitSource: "user",
+    confidence: 1,
+    evidence: [`用户在 Review 中确认无单位长度按 ${unit} 处理。`],
+    requiresConfirmation: false,
+    fields: Object.fromEntries(Object.entries(diagnosticsByField).map(([field, diagnostic]) => [field, (
+      diagnostic?.sourceUnit === "unknown"
+        ? {
+          ...diagnostic,
+          sourceUnit: unit,
+          unitSource: "user",
+          values: (diagnostic.values ?? []).map((item) => ({
+            ...item,
+            sourceUnit: unit,
+            normalizedValue: unit === "cm" ? Number(item.sourceValue) * 10 : Number(item.sourceValue),
+          })),
+        }
+        : diagnostic
+    )])),
+  } : null;
+  const allParserWarnings = (draft.allParserWarnings ?? draft.parserWarnings ?? []).filter(({ code }) => code !== "UNIT_UNCERTAIN");
+  return applyImportSizeSelection({
+    ...draft,
+    candidateSizes,
+    measurementContext: {
+      ...draft.measurementContext,
+      defaultLengthUnit: unit,
+      unitSource: "user",
+      confidence: 1,
+      evidence: [`用户在 Review 中确认无单位长度按 ${unit} 处理。`],
+      requiresConfirmation: false,
+    },
+    unitDiagnostics,
+    allParserWarnings,
+  }, getSelectedImportSizes({ ...draft, candidateSizes }));
 }
 
 function applyImportSizeSelection(draft, selectedImportSizes) {
@@ -282,6 +345,7 @@ export function validateGeometryImportDraft(draft) {
   const errors = {};
   if (!draft?.brand?.trim()) errors.brand = "请输入品牌名称";
   if (!BIKE_CATEGORIES.includes(draft?.category)) errors.category = "请选择车架类型";
+  if (draft?.measurementContext?.requiresConfirmation) errors.unit = "请选择长度单位";
 
   const sizes = getSelectedImportSizes(draft);
   if (sizes.length === 0) errors.sizes = "未识别到可用尺码";
@@ -445,5 +509,7 @@ export function bikeToGeometryImportDraft(bike) {
     parserConfirmationCount: parserWarnings.filter((warning) => ["CELL_UNRECOGNIZED", "SIZE_COLUMN_MISSING", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)).length,
     unrecognizedFields: bike.importSource?.unrecognizedFields ?? [],
     parserMeta: bike.importSource?.parserMeta ?? null,
+    measurementContext: bike.importSource?.measurementContext ?? null,
+    unitDiagnostics: bike.importSource?.unitDiagnostics ?? null,
   };
 }

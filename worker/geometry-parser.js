@@ -7,11 +7,12 @@ import {
   validateAndNormalizeGeometryParserResponse,
 } from "../src/services/geometryParserValidator.js";
 import { mapRawGeometryTableToParserResponse } from "../src/services/geometryParserRawTableMapper.js";
+import { normalizeGeometryParserUnits } from "../src/services/geometryParserUnitNormalizer.js";
 import { getGeometryProvider } from "./providers/geometryProviderRegistry.js";
 
 const PARSER_PATH = "/api/geometry/parse";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const PARSER_PROTOCOL_VERSION = "raw-table-v2-classified";
+const PARSER_PROTOCOL_VERSION = "raw-table-v5-unit-source";
 
 const SYSTEM_PROMPT = `You classify and extract bicycle frame geometry tables from product images in one request.
 Read the image itself. Do not use the filename, brand assumptions, known-bike memory, presets, or guessed fallback values.
@@ -26,7 +27,14 @@ Only when inputClassification.type is road_bike_geometry, continue with the raw 
 The image may contain multiple frame-size columns. Find the complete geometry table, determine whether sizes are rows or columns, and identify every size.
 Preserve every official size label exactly as printed and in source order. Never shorten, normalize, convert, or reinterpret a size label.
 Return the raw geometry table, not an interpretation into another schema. rawRows must include every detected source row, including rows whose meaning is uncertain or not useful to a bicycle renderer.
-For each raw row, preserve the source label text as printed, record its displayed unit when available, and provide one value per detected size in the exact source column order. Use null only for an unreadable cell; never delete an entire row because its field meaning is uncertain.
+For each raw row, preserve the source label text as printed and provide one value per detected size in the exact source column order. Use null only for an unreadable cell; never delete an entire row because its field meaning is uncertain.
+For each raw row, unitSource must describe where its unit came from:
+- explicit_row: a unit is visibly attached to this row label or appears in a dedicated unit cell for this row. Put that visible unit in unit.
+- global_default: the row has no visible row-specific unit and only inherits an image-wide or table-wide unit statement. Do not copy or guess a unit into unit; return unit as null.
+- unknown: neither a row-specific unit nor a reliable table-wide unit is visible. Return unit as null.
+Never promote a global unit statement into a per-row explicit unit. Never write mm into a row merely because a downstream schema uses mm.
+Preserve raw numeric values exactly as printed. Never convert cm, mm, or inches inside rawRows.
+Also return measurementContext.defaultLengthUnit for road_bike_geometry. Read the table title, headers, footnotes, and image-wide unit notes (for example, “all measurements are in cm unless otherwise noted”). It must be exactly one of mm, cm, in, or unknown. This is the source unit for length rows marked global_default; only a genuinely visible explicit_row unit may override it. Never infer a unit merely from a number's size.
 Do not infer a row's meaning from diagram letters such as A, B, C, D, E, F, G, H, I, J, or K. Do not omit rows such as Wheelbase, Fork Offset, Standover, or Chinese-labelled geometry rows merely because they may not exist in a downstream schema.
 Never drop a size because one or more cells are uncertain. Never shift a value into a neighboring size. Return only one valid JSON Object matching the requested raw-table fields.`;
 
@@ -233,7 +241,8 @@ export function createGeometryParserWorker({
           requireRawGeometryTable(providerResult?.structuredOutput);
         }
         const mappedResponse = mapRawGeometryTableToParserResponse(providerResult?.structuredOutput);
-        const validated = validateAndNormalizeGeometryParserResponse(mappedResponse);
+        const unitNormalizedResponse = normalizeGeometryParserUnits(mappedResponse);
+        const validated = validateAndNormalizeGeometryParserResponse(unitNormalizedResponse);
         return jsonResponse({
           ...validated,
           ...(inputClassification ? { inputClassification } : {}),

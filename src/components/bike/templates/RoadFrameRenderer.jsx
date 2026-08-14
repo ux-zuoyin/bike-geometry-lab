@@ -63,6 +63,7 @@ import {
   ALL_ROUND_SEAT_TUBE_BOTTOM_SOURCE_HALF_WIDTH_PX,
   ALL_ROUND_SEAT_TUBE_TOP_SOURCE_HALF_WIDTH_PX,
   getAllRoundSeatTubeShape,
+  getRoundedTubeShape,
 } from "../../../lib/bikeVisual/seatTubeGeometry.js";
 import {
   ALL_ROUND_DOWN_TUBE_MASK_CLEARANCE_PX,
@@ -811,12 +812,13 @@ export function RoadFrameRenderer({
       : ALL_ROUND_TOP_TUBE_HEAD_SOURCE_HALF_WIDTH_PX
   ) * figmaShapeScale;
   const programmaticAeroHeadTubeShape = isAero
-    ? getAllRoundSeatTubeShape({
+    ? getRoundedTubeShape({
       bottomBracket: parentAnchors.headBottom,
       seatTubeTop: parentAnchors.headTop,
       towardPoint: aeroVisualAnchors.topTubeSeatJoint,
       topHalfWidthPx: programmaticHeadTubeHalfWidthPx,
       bottomHalfWidthPx: programmaticHeadTubeHalfWidthPx,
+      cornerRadiusPx: AERO_VISUAL_CONFIG.headTubeCornerRadiusSourcePx * figmaShapeScale,
     })
     : null;
   const fittedAeroTopTubeJoints = isAero
@@ -933,13 +935,20 @@ export function RoadFrameRenderer({
     ? aeroSeatTubeVisualTop.point
     : parentAnchors.seatpostSocketAnchor;
   const programmaticSeatTubeShape = usesProgrammaticRoadTubes
-    ? getAllRoundSeatTubeShape({
+    ? (isAero ? getRoundedTubeShape({
       bottomBracket: parentAnchors.bottomBracket,
       seatTubeTop: seatTubeVisualTop,
       towardPoint: topTubeHeadJoint,
       topHalfWidthPx: seatTubeTopHalfWidthPx,
       bottomHalfWidthPx: seatTubeBottomHalfWidthPx,
-    })
+      cornerRadiusPx: AERO_VISUAL_CONFIG.seatTubeCornerRadiusSourcePx * figmaShapeScale,
+    }) : getAllRoundSeatTubeShape({
+      bottomBracket: parentAnchors.bottomBracket,
+      seatTubeTop: seatTubeVisualTop,
+      towardPoint: topTubeHeadJoint,
+      topHalfWidthPx: seatTubeTopHalfWidthPx,
+      bottomHalfWidthPx: seatTubeBottomHalfWidthPx,
+    }))
     : null;
   const programmaticTopTubeShape = usesProgrammaticRoadTubes
     ? getAllRoundTopTubeShape({
@@ -1188,10 +1197,10 @@ export function RoadFrameRenderer({
       data-aero-top-tube-upper-head-boundary-ratio={isAero ? fittedAeroTopTubeJoints.upperBoundaryRatio.toFixed(9) : undefined}
       data-aero-top-tube-lower-head-boundary-ratio={isAero ? fittedAeroTopTubeJoints.lowerBoundaryRatio.toFixed(9) : undefined}
       data-aero-top-tube-head-cap-inset-px={isAero ? fittedAeroTopTubeJoints.headTubeEndInsetPx.toFixed(6) : undefined}
-      data-head-tube-runtime-source={isAero ? "programmatic-closed-path" : "figma-svg"}
+      data-head-tube-runtime-source={isAero ? "programmatic-rounded-rect" : "figma-svg"}
       data-head-tube-seatward-boundary-start={isAero ? `${programmaticAeroHeadTubeShape.headwardBottom.x.toFixed(3)},${programmaticAeroHeadTubeShape.headwardBottom.y.toFixed(3)}` : undefined}
       data-head-tube-seatward-boundary-end={isAero ? `${programmaticAeroHeadTubeShape.headwardTop.x.toFixed(3)},${programmaticAeroHeadTubeShape.headwardTop.y.toFixed(3)}` : undefined}
-      data-seat-tube-runtime-source={usesProgrammaticRoadTubes ? "programmatic-tapered-path" : "figma-svg"}
+      data-seat-tube-runtime-source={usesProgrammaticRoadTubes ? (isAero ? "programmatic-rounded-rect" : "programmatic-tapered-path") : "figma-svg"}
       data-seat-tube-top-half-width-px={usesProgrammaticRoadTubes ? seatTubeTopHalfWidthPx.toFixed(6) : undefined}
       data-seat-tube-bottom-half-width-px={usesProgrammaticRoadTubes ? seatTubeBottomHalfWidthPx.toFixed(6) : undefined}
       data-seat-tube-headward-top={usesProgrammaticRoadTubes ? `${programmaticSeatTubeShape.headwardTop.x.toFixed(3)},${programmaticSeatTubeShape.headwardTop.y.toFixed(3)}` : undefined}
@@ -1353,7 +1362,7 @@ export function RoadFrameRenderer({
           <path
             d={programmaticAeroHeadTubeShape.path}
             fill={components.frameColor}
-            className="figma-bike__frame-part figma-bike__head-tube figma-bike__head-tube--aero-programmatic"
+            className="figma-bike__frame-part figma-bike__head-tube figma-bike__head-tube--aero-rounded"
             data-render-layer="head-tube-programmatic-aero"
             data-shape-points="bottom-seatward top-seatward top-frontward bottom-frontward"
           />
@@ -1362,7 +1371,7 @@ export function RoadFrameRenderer({
           <path
             d={programmaticSeatTubeShape.path}
             fill={components.frameColor}
-            className="figma-bike__frame-part figma-bike__seat-tube figma-bike__seat-tube--aero-programmatic"
+            className="figma-bike__frame-part figma-bike__seat-tube figma-bike__seat-tube--aero-rounded"
             data-render-layer="seat-tube-programmatic-aero"
             data-shape-points="bb-headward top-headward top-rearward bb-rearward"
           />

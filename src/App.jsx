@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { updateWheelSelection, updateWheelSelectionLink } from "./config/bikeComponents.js";
 import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersistence.js";
 import { createBikeFromGeometryImport, createComparisonBike, createPresetExperiencePack, getPersistableBikeSetup, instantiatePresetExperienceBike, updateBikeSeatStayStyle, updateBikeSize } from "./state/dualBikeState.js";
-import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
+import { addGeometryImportDraftSize, bikeToGeometryImportDraft, confirmGeometryImportLengthUnit, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
 import { DeveloperAboutModal, LandingPage } from "./components/landing/LandingPage.jsx";
 import brandLogo from "./assets/brand/logo_bai.png";
@@ -282,6 +282,15 @@ export function App() {
       return next;
     });
   };
+  const confirmGeometryImportUnit = (unit) => {
+    setGeometryImportDraft((current) => confirmGeometryImportLengthUnit(current, unit));
+    setGeometryImportErrors((current) => {
+      if (!current.unit) return current;
+      const next = { ...current };
+      delete next.unit;
+      return next;
+    });
+  };
   const confirmGeometryImport = () => {
     const validation = validateGeometryImportDraft(geometryImportDraft);
     if (!validation.isValid) {
@@ -514,6 +523,7 @@ export function App() {
             onCopySize: copyGeometryImportSize,
             onManualSizeChange: renameManualGeometryImportSize,
             onGeometryFieldChange: updateGeometryImportField,
+            onUnitConfirm: confirmGeometryImportUnit,
             onConfirm: confirmGeometryImport,
             onReanalyze: () => geometryImportImage && analyzeGeometryImageRecord(geometryImportImage, importOperation),
             onCancel: clearImportFlow,

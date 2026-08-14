@@ -112,6 +112,7 @@ import {
   ALL_ROUND_SEAT_TUBE_BOTTOM_SOURCE_HALF_WIDTH_PX,
   ALL_ROUND_SEAT_TUBE_TOP_SOURCE_HALF_WIDTH_PX,
   getAllRoundSeatTubeShape,
+  getRoundedTubeShape,
 } from "../src/lib/bikeVisual/seatTubeGeometry.js";
 import {
   ALL_ROUND_DOWN_TUBE_HEAD_JOINT_RATIO,
@@ -150,6 +151,7 @@ import { getSTRProfile } from "../src/lib/geometry/strProfile.js";
 import {
   addGeometryImportDraftSize,
   bikeToGeometryImportDraft,
+  confirmGeometryImportLengthUnit,
   copyGeometryImportDraftSize,
   CORE_GEOMETRY_FIELD_KEYS,
   createManualGeometryImportDraft,
@@ -1238,6 +1240,26 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   const identified = { ...edited, brand: "Quick", model: "Zeitpro", category: "endurance" };
   assert.equal(validateGeometryImportDraft(identified).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, model: "" }).isValid, true);
+  const unitPending = {
+    ...identified,
+    measurementContext: { defaultLengthUnit: "unknown", requiresConfirmation: true },
+    unitDiagnostics: {
+      fields: {
+        reach: {
+          sourceUnit: "unknown",
+          values: [{ size: "54", sourceValue: 37.4, normalizedValue: 37.4 }],
+        },
+      },
+    },
+    allParserWarnings: [{ code: "UNIT_UNCERTAIN", message: "请选择长度单位", field: null, size: null }],
+    parserWarnings: [{ code: "UNIT_UNCERTAIN", message: "请选择长度单位", field: null, size: null }],
+  };
+  assert.equal(validateGeometryImportDraft(unitPending).firstErrorKey, "unit");
+  const cmConfirmed = confirmGeometryImportLengthUnit(unitPending, "cm");
+  assert.equal(cmConfirmed.measurementContext.requiresConfirmation, false);
+  assert.equal(cmConfirmed.sizes[54].reach, 374);
+  assert.equal(cmConfirmed.parserWarnings.some(({ code }) => code === "UNIT_UNCERTAIN"), false);
+  assert.equal(validateGeometryImportDraft(cmConfirmed).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, selectedImportSizes: [], sizes: {} }).firstErrorKey, "sizes");
   const withAdjacentSize = toggleGeometryImportSize(identified, "49");
   assert.deepEqual(withAdjacentSize.selectedImportSizes, ["49", "54"]);
@@ -2231,7 +2253,7 @@ test("All-Round programmatic SeatTube keeps a size-independent taper on the live
     assert.deepEqual(renderData.frame, originalFrame);
   }
 
-  assert.match(enduranceTemplateSource, /data-seat-tube-runtime-source=\{usesProgrammaticRoadTubes \? "programmatic-tapered-path" : "figma-svg"\}/);
+  assert.match(enduranceTemplateSource, /data-seat-tube-runtime-source=\{usesProgrammaticRoadTubes \? \(isAero \? "programmatic-rounded-rect" : "programmatic-tapered-path"\) : "figma-svg"\}/);
   assert.match(enduranceTemplateSource, /data-render-layer="seat-tube-programmatic-all-round"/);
   assert.match(enduranceTemplateSource, /d=\{programmaticSeatTubeShape\.path\}/);
   assert.doesNotMatch(enduranceTemplateSource, /allRoundFrameSeatTubeSource/);
@@ -2604,12 +2626,13 @@ test("Aero V1 Stable maps the frozen standard-topology template and preserves Ge
         * AERO_VISUAL_CONFIG.headTubeHalfWidthSourcePx,
     };
     const headTubeHalfWidthPx = Math.hypot(mappedHeadNormal.x, mappedHeadNormal.y);
-    const headTubeShape = getAllRoundSeatTubeShape({
+    const headTubeShape = getRoundedTubeShape({
       bottomBracket: headBottom,
       seatTubeTop: headTop,
       towardPoint: visual.topTubeSeatJoint,
       topHalfWidthPx: headTubeHalfWidthPx,
       bottomHalfWidthPx: headTubeHalfWidthPx,
+      cornerRadiusPx: AERO_VISUAL_CONFIG.headTubeCornerRadiusSourcePx * figmaShapeScale,
     });
     const fittedTopTubeJoints = fitTopTubeJointsToHeadTubeBoundary({
       bottomBracket,
@@ -2629,13 +2652,18 @@ test("Aero V1 Stable maps the frozen standard-topology template and preserves Ge
       geometrySeatTubeTop: seatCluster,
       topTubeSeatJoint: fittedTopTubeJoints.topTubeSeatJoint,
     });
-    const seatTubeShape = getAllRoundSeatTubeShape({
+    const seatTubeShape = getRoundedTubeShape({
       bottomBracket,
       seatTubeTop: seatTubeVisualTop.point,
       towardPoint: fittedTopTubeJoints.topTubeHeadJoint,
       topHalfWidthPx: AERO_VISUAL_CONFIG.seatTubeTopHalfWidthSourcePx * figmaShapeScale,
       bottomHalfWidthPx: AERO_VISUAL_CONFIG.seatTubeBottomHalfWidthSourcePx * figmaShapeScale,
+      cornerRadiusPx: AERO_VISUAL_CONFIG.seatTubeCornerRadiusSourcePx * figmaShapeScale,
     });
+    assert.ok(headTubeShape.cornerRadiusPx > 0, `${sizeData.size} Aero HeadTube uses rounded corners`);
+    assert.ok(seatTubeShape.cornerRadiusPx > 0, `${sizeData.size} Aero SeatTube uses rounded corners`);
+    assert.match(headTubeShape.path, /Q/, `${sizeData.size} Aero HeadTube has curved cap transitions`);
+    assert.match(seatTubeShape.path, /Q/, `${sizeData.size} Aero SeatTube has curved cap transitions`);
     const topTubeShape = getAllRoundTopTubeShape({
       bottomBracket,
       seatCluster,
@@ -2825,6 +2853,8 @@ test("Aero V1 Stable maps the frozen standard-topology template and preserves Ge
   assert.match(enduranceTemplateSource, /data-render-layer="top-tube-programmatic-aero"/);
   assert.match(enduranceTemplateSource, /data-render-layer="head-tube-programmatic-aero"/);
   assert.match(enduranceTemplateSource, /data-render-layer="down-tube-programmatic-aero"/);
+  assert.match(enduranceTemplateSource, /getRoundedTubeShape/);
+  assert.match(enduranceTemplateSource, /programmatic-rounded-rect/);
   assert.match(enduranceTemplateSource, /getAeroSeatTubeVisualTop/);
   assert.match(enduranceTemplateSource, /getAeroDownTubeShape/);
   assert.match(enduranceTemplateSource, /data-aero-seat-tube-joint-overlap-px/);

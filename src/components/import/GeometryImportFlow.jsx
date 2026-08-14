@@ -113,7 +113,23 @@ function GeometryFieldRows({ fields, draft, errors, parserWarnings, onGeometryFi
   );
 }
 
-function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+function LengthUnitConfirmation({ context, error, onConfirm }) {
+  if (!context?.requiresConfirmation) return null;
+  const errorId = "geometry-import-unit-error";
+  return (
+    <div className={`geometry-import__unit-confirmation${error ? " has-error" : ""}`} data-validation-key="unit" tabIndex={error ? -1 : undefined}>
+      <strong>这张几何表没有明确标注单位。</strong>
+      <span>请选择无单位长度数据使用的单位。</span>
+      <div role="group" aria-label="长度单位" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}>
+        <button type="button" onClick={() => onConfirm("mm")}>mm</button>
+        <button type="button" onClick={() => onConfirm("cm")}>cm</button>
+      </div>
+      {error && <em id={errorId} role="alert">{error}</em>}
+    </div>
+  );
+}
+
+function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onUnitConfirm, onConfirm, onReanalyze, onCancel }) {
   const [newSize, setNewSize] = useState("");
   const [submitFeedback, setSubmitFeedback] = useState(null);
   const [sizeSelectionHint, setSizeSelectionHint] = useState(null);
@@ -253,6 +269,7 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
             </ul>
           )}
         </div>
+        <LengthUnitConfirmation context={draft.measurementContext} error={errors.unit} onConfirm={onUnitConfirm} />
         {image && <ImageSummary image={image} onSelectImage={onSelectImage} />}
         <div className="geometry-import__identity-fields">
           <label><span>品牌名称</span><input data-validation-key="brand" type="text" value={draft.brand} placeholder="例如 TREK" aria-invalid={Boolean(errors.brand)} aria-describedby={errors.brand ? "geometry-import-brand-error" : undefined} onChange={(event) => onDraftMetaChange("brand", event.target.value)} />{errors.brand && <small id="geometry-import-brand-error" role="alert">{errors.brand}</small>}</label>
@@ -313,8 +330,8 @@ function ErrorState({ code, message, image, onSelectImage, onReanalyze, onCancel
   return <div className="geometry-import geometry-import--error"><section className="geometry-import__block"><WarningCircle size={30} weight="regular" aria-hidden="true" /><h3>{presentation.title}</h3><p>{presentation.message}</p><div className="geometry-import__error-actions">{presentation.canReanalyze && image && onReanalyze && <button type="button" className="geometry-import__secondary" onClick={onReanalyze}>重新识别</button>}<GeometryImagePicker compact label="重新上传图片" onSelectImage={onSelectImage} />{onCancel && <button type="button" className="geometry-import__cancel" onClick={onCancel}>取消</button>}</div></section></div>;
 }
 
-export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorCode, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onConfirm, onReanalyze, onCancel }) {
+export function GeometryImportFlow({ status, mode = "add", image, draft, errors, errorCode, errorMessage, onSelectImage, onDraftMetaChange, onSelectSize, onToggleImportSize, onAddSize, onCopySize, onManualSizeChange, onGeometryFieldChange, onUnitConfirm, onConfirm, onReanalyze, onCancel }) {
   if (status === "analyzing" && image) return <AnalyzingState image={image} onSelectImage={onSelectImage} onCancel={onCancel} />;
-  if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onToggleImportSize={onToggleImportSize} onAddSize={onAddSize} onCopySize={onCopySize} onManualSizeChange={onManualSizeChange} onGeometryFieldChange={onGeometryFieldChange} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
+  if (status === "review" && draft) return <ReviewState mode={mode} image={image} draft={draft} errors={errors} onSelectImage={onSelectImage} onDraftMetaChange={onDraftMetaChange} onSelectSize={onSelectSize} onToggleImportSize={onToggleImportSize} onAddSize={onAddSize} onCopySize={onCopySize} onManualSizeChange={onManualSizeChange} onGeometryFieldChange={onGeometryFieldChange} onUnitConfirm={onUnitConfirm} onConfirm={onConfirm} onReanalyze={onReanalyze} onCancel={onCancel} />;
   return <ErrorState code={errorCode} message={errorMessage} image={image} onSelectImage={onSelectImage} onReanalyze={onReanalyze} onCancel={onCancel} />;
 }
