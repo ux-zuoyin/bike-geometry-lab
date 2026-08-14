@@ -1,4 +1,4 @@
-import { WORKSPACE_ENTRY_MODE_OPTIONS } from "../../state/workspaceEntryMode.js";
+import { WORKSPACE_ENTRY_MODE, WORKSPACE_ENTRY_MODE_OPTIONS } from "../../state/workspaceEntryMode.js";
 
 export function WorkspaceModeNavigation({ value, onChange }) {
   return (
@@ -13,7 +13,10 @@ export function WorkspaceModeNavigation({ value, onChange }) {
             aria-selected={value === option.value}
             onClick={() => onChange(option.value)}
           >
-            {option.label}
+            <span>{option.label}</span>
+            {option.value === WORKSPACE_ENTRY_MODE.UPLOAD && (
+              <span className="workspace-mode-nav__beta">Beta</span>
+            )}
           </button>
         ))}
       </div>
