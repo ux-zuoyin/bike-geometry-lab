@@ -12,8 +12,6 @@ function createParserDiagnostics(response) {
   const diagnostics = {
     rawRows,
     inputClassification,
-    measurementContext: response.measurementContext ?? null,
-    unitDiagnostics: response.unitDiagnostics ?? null,
     provider: meta.provider ?? null,
     model: meta.model ?? null,
     requestId: meta.requestId ?? null,
@@ -35,24 +33,6 @@ function createParserDiagnostics(response) {
     console.log("Raw Rows", rawRows.map((row) => ({ label: row.label, values: row.values })));
     console.log("Unrecognized Fields", response.unrecognizedFields ?? []);
     console.groupEnd();
-    if (diagnostics.unitDiagnostics) {
-      console.group("Geometry Unit Diagnostics");
-      console.log("Explicit Global Unit", diagnostics.unitDiagnostics.explicitGlobalUnit ?? null);
-      console.log("Inferred Unit", diagnostics.unitDiagnostics.inferredLengthUnit ?? null);
-      console.log("Default Length Unit", diagnostics.unitDiagnostics.defaultLengthUnit ?? null);
-      console.log("Unit Source", diagnostics.unitDiagnostics.unitSource ?? "unknown");
-      console.log("Confidence", diagnostics.unitDiagnostics.confidence ?? null);
-      console.log("Evidence", diagnostics.unitDiagnostics.evidence ?? []);
-      for (const [field, detail] of Object.entries(diagnostics.unitDiagnostics.fields ?? {})) {
-        console.log(field, {
-          sourceLabel: detail.sourceLabel ?? null,
-          sourceUnit: detail.sourceUnit ?? "unknown",
-          normalizedUnit: detail.normalizedUnit ?? null,
-          values: detail.values ?? [],
-        });
-      }
-      console.groupEnd();
-    }
   }
 
   return diagnostics;
@@ -100,8 +80,6 @@ export function geometryParserResponseToDraft(response) {
     unrecognizedFields: response.unrecognizedFields ?? [],
     parserMeta: response.meta ?? null,
     rawRows: response.rawRows ?? [],
-    measurementContext: response.measurementContext ?? null,
-    unitDiagnostics: response.unitDiagnostics ?? null,
   };
   const parserDiagnostics = createParserDiagnostics(response);
   return parserDiagnostics ? { ...draft, parserDiagnostics } : draft;

@@ -151,7 +151,6 @@ import { getSTRProfile } from "../src/lib/geometry/strProfile.js";
 import {
   addGeometryImportDraftSize,
   bikeToGeometryImportDraft,
-  confirmGeometryImportLengthUnit,
   copyGeometryImportDraftSize,
   CORE_GEOMETRY_FIELD_KEYS,
   createManualGeometryImportDraft,
@@ -1240,26 +1239,6 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   const identified = { ...edited, brand: "Quick", model: "Zeitpro", category: "endurance" };
   assert.equal(validateGeometryImportDraft(identified).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, model: "" }).isValid, true);
-  const unitPending = {
-    ...identified,
-    measurementContext: { defaultLengthUnit: "unknown", requiresConfirmation: true },
-    unitDiagnostics: {
-      fields: {
-        reach: {
-          sourceUnit: "unknown",
-          values: [{ size: "54", sourceValue: 37.4, normalizedValue: 37.4 }],
-        },
-      },
-    },
-    allParserWarnings: [{ code: "UNIT_UNCERTAIN", message: "请选择长度单位", field: null, size: null }],
-    parserWarnings: [{ code: "UNIT_UNCERTAIN", message: "请选择长度单位", field: null, size: null }],
-  };
-  assert.equal(validateGeometryImportDraft(unitPending).firstErrorKey, "unit");
-  const cmConfirmed = confirmGeometryImportLengthUnit(unitPending, "cm");
-  assert.equal(cmConfirmed.measurementContext.requiresConfirmation, false);
-  assert.equal(cmConfirmed.sizes[54].reach, 374);
-  assert.equal(cmConfirmed.parserWarnings.some(({ code }) => code === "UNIT_UNCERTAIN"), false);
-  assert.equal(validateGeometryImportDraft(cmConfirmed).isValid, true);
   assert.equal(validateGeometryImportDraft({ ...identified, selectedImportSizes: [], sizes: {} }).firstErrorKey, "sizes");
   const withAdjacentSize = toggleGeometryImportSize(identified, "49");
   assert.deepEqual(withAdjacentSize.selectedImportSizes, ["49", "54"]);

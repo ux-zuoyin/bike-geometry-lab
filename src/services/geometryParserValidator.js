@@ -4,7 +4,6 @@ import {
   GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
   GEOMETRY_PARSER_SCHEMA_VERSION,
 } from "./geometryParserSchema.js";
-import { normalizeGeometryMeasurementContext } from "./geometryParserUnitNormalizer.js";
 
 const fieldLabels = Object.fromEntries(
   GEOMETRY_PARSER_FIELDS.map(({ key, label }) => [key, label]),
@@ -72,9 +71,6 @@ function sanitizeRawRows(value) {
     return [{
       label: String(item.label).trim(),
       unit: item.unit == null || item.unit === "" ? null : String(item.unit).trim(),
-      unitSource: ["explicit_row", "global_default", "unknown"].includes(item.unitSource)
-        ? item.unitSource
-        : "unknown",
       values: Array.isArray(item.values)
         ? item.values.map((cell) => {
           const numericValue = cell == null || cell === "" ? null : Number(cell);
@@ -83,36 +79,6 @@ function sanitizeRawRows(value) {
         : [],
     }];
   });
-}
-
-function sanitizeUnitDiagnostics(value) {
-  if (!isRecord(value)) return null;
-  const fields = isRecord(value.fields) ? value.fields : {};
-  const context = normalizeGeometryMeasurementContext(value);
-  return {
-    ...context,
-    fields: Object.fromEntries(Object.entries(fields).flatMap(([field, diagnostic]) => {
-      if (!GEOMETRY_PARSER_FIELD_KEYS.includes(field) || !isRecord(diagnostic)) return [];
-      return [[field, {
-        sourceLabel: diagnostic.sourceLabel == null ? null : String(diagnostic.sourceLabel).trim() || null,
-        sourceUnit: diagnostic.sourceUnit == null ? "unknown" : String(diagnostic.sourceUnit),
-        unitSource: diagnostic.unitSource == null ? "unknown" : String(diagnostic.unitSource),
-        normalizedUnit: diagnostic.normalizedUnit == null ? null : String(diagnostic.normalizedUnit),
-        values: Array.isArray(diagnostic.values) ? diagnostic.values.flatMap((item) => {
-          if (!isRecord(item)) return [];
-          const sourceValue = item.sourceValue == null ? null : Number(item.sourceValue);
-          const normalizedValue = item.normalizedValue == null ? null : Number(item.normalizedValue);
-          if (!Number.isFinite(sourceValue) || !Number.isFinite(normalizedValue)) return [];
-          return [{
-            size: toSize(item.size),
-            sourceValue,
-            sourceUnit: item.sourceUnit == null ? "unknown" : String(item.sourceUnit),
-            normalizedValue,
-          }];
-        }) : [],
-      }]];
-    })),
-  };
 }
 
 export class GeometryParserValidationError extends Error {
@@ -162,10 +128,6 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
 
   const warnings = [];
   const seenWarnings = new Set();
-  const unitDiagnostics = sanitizeUnitDiagnostics(rawResponse.unitDiagnostics);
-  const unresolvedUnitFields = new Set(Object.entries(unitDiagnostics?.fields ?? {}).flatMap(([field, diagnostic]) => (
-    diagnostic.sourceUnit === "unknown" && diagnostic.values.length ? [field] : []
-  )));
   for (const item of sanitizeModelWarnings(rawResponse.warnings)) {
     appendWarning(warnings, seenWarnings, item);
   }
@@ -234,7 +196,7 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
         );
       } else {
         const range = GEOMETRY_PARSER_PLAUSIBILITY_RANGES[field];
-        if (range && !unresolvedUnitFields.has(field) && (value < range.min || value > range.max)) {
+        if (range && (value < range.min || value > range.max)) {
           appendWarning(
             warnings,
             seenWarnings,
@@ -302,7 +264,5 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
     confirmationCount,
     unrecognizedFields: sanitizeUnrecognizedFields(rawResponse.unrecognizedFields),
     rawRows: sanitizeRawRows(rawResponse.rawRows),
-    measurementContext: normalizeGeometryMeasurementContext(rawResponse.measurementContext),
-    unitDiagnostics,
   };
 }
