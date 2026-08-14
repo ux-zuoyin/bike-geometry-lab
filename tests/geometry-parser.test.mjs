@@ -160,6 +160,19 @@ test("explicit centimetre context normalizes mapped lengths once and preserves a
   assert.equal(normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "unknown" }), mapped);
 });
 
+test("explicit millimetre context is an identity transform for the complete QUICK baseline", () => {
+  const rawTable = createQuickGeometryParserRawTableFixture();
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "mm" });
+  const validated = validateAndNormalizeGeometryParserResponse(normalized);
+
+  assert.deepEqual(normalized, mapped);
+  assert.deepEqual(validated.detectedSizes, QUICK_SIZES);
+  for (const entry of validated.sizes) {
+    assert.deepEqual(entry.geometry, QUICK_GEOMETRY[entry.size]);
+  }
+});
+
 test("raw QUICK table preserves Wheelbase and Fork Offset rows before deterministic mapping", () => {
   const rawTable = createQuickGeometryParserRawTableFixture();
   const mapped = mapRawGeometryTableToParserResponse(rawTable);
