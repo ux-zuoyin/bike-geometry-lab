@@ -240,6 +240,7 @@ const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8
 const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const landingPageSource = readFileSync(new URL("../src/components/landing/LandingPage.jsx", import.meta.url), "utf8");
 const dotFieldSource = readFileSync(new URL("../src/components/landing/DotField.jsx", import.meta.url), "utf8");
+const workspaceModeNavigationSource = readFileSync(new URL("../src/components/navigation/WorkspaceModeNavigation.jsx", import.meta.url), "utf8");
 const frameBottomBracketSource = readFileSync(
   new URL("../src/assets/bikeTemplates/endurance/frame-bottom-bracket.svg", import.meta.url),
   "utf8",
@@ -1109,6 +1110,8 @@ test("Workspace entry modes remain a global layer above Preset bike selection an
   assert.match(stylesSource, /\.workspace-mode-nav\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*align-items:\s*stretch;[^}]*justify-self:\s*center/s);
   assert.match(stylesSource, /\.workspace-mode-nav__items\s*\{[^}]*height:\s*var\(--app-header-height\);[^}]*gap:\s*28px/s);
   assert.match(stylesSource, /\.workspace-mode-nav__items button\.is-selected\s*\{[^}]*background:\s*transparent;[^}]*color:\s*#65A0FF/s);
+  assert.match(workspaceModeNavigationSource, /option\.value === WORKSPACE_ENTRY_MODE\.UPLOAD[\s\S]*workspace-mode-nav__beta[\s\S]*Beta/);
+  assert.match(stylesSource, /\.workspace-mode-nav__beta\s*\{[^}]*border-radius:\s*999px;[^}]*font-size:\s*10px/s);
   assert.doesNotMatch(stylesSource, /\.site-header--with-mode-nav|\.workspace\.workspace--with-mode-nav|calc\(100vh - 108px\)/);
 });
 
