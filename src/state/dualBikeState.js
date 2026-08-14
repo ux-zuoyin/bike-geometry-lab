@@ -194,6 +194,15 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
       parserWarnings: [...(draft.allParserWarnings ?? draft.parserWarnings ?? [])],
       unrecognizedFields: (draft.unrecognizedFields ?? []).map((field) => ({ ...field, values: [...(field.values ?? [])] })),
       parserMeta: draft.parserMeta ? { ...draft.parserMeta } : null,
+      measurementContext: draft.measurementContext ? { ...draft.measurementContext, evidence: [...(draft.measurementContext.evidence ?? [])] } : null,
+      unitDiagnostics: draft.unitDiagnostics ? {
+        ...draft.unitDiagnostics,
+        evidence: [...(draft.unitDiagnostics.evidence ?? [])],
+        fields: Object.fromEntries(Object.entries(draft.unitDiagnostics.fields ?? {}).map(([field, diagnostic]) => [field, {
+          ...diagnostic,
+          values: [...(diagnostic.values ?? [])],
+        }])),
+      } : null,
     },
     brand: draft.brand.trim(),
     model: draft.model.trim() || "未命名车型",
