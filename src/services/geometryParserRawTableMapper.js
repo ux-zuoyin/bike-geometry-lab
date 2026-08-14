@@ -36,9 +36,6 @@ function warning(code, message, field = null, size = null) {
 function getCanonicalField(label) {
   const normalized = normalizeLabel(label);
   if (getExcludedSemantic(normalized)) return null;
-  // A short alias such as "seattube" must never win before the more
-  // specific "seattubeangle". Match every alias and select the longest
-  // semantic phrase rather than relying on declaration order.
   const matches = FIELD_ALIASES.flatMap(([field, aliases]) => aliases
     .filter((alias) => normalized.includes(alias))
     .map((alias) => ({ field, alias })));
@@ -82,9 +79,6 @@ function normalizeRawRows(value, sizeCount, warnings) {
     return [{
       label: toSize(row.label),
       unit: row.unit == null || row.unit === "" ? null : String(row.unit).trim(),
-      unitSource: ["explicit_row", "global_default", "unknown"].includes(row.unitSource)
-        ? row.unitSource
-        : "unknown",
       values,
       sourceIndex: rowIndex,
     }];
@@ -146,13 +140,5 @@ export function mapRawGeometryTableToParserResponse(rawResponse) {
     warnings,
     unrecognizedFields,
     rawRows,
-    // Internal handoff to the unit normalizer. It is intentionally stripped
-    // before the validated API response so rawRows remain the public source of
-    // truth for original labels, values and units.
-    fieldSources: Object.fromEntries(GEOMETRY_PARSER_FIELD_KEYS.map((field) => {
-      const row = rowsByField.get(field);
-      return [field, row ? { label: row.label, unit: row.unit, unitSource: row.unitSource } : null];
-    })),
-    measurementContext: rawResponse.measurementContext,
   };
 }

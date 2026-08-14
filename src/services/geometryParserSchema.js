@@ -25,9 +25,6 @@ export const GEOMETRY_PARSER_FIELD_KEYS = Object.freeze(
   GEOMETRY_PARSER_FIELDS.map(({ key }) => key),
 );
 
-// Geometry values enter the product schema as millimetres (or degrees for
-// angles). Keep this list explicit so unit conversion never relies on a
-// plausibility range or a value-size heuristic.
 export const GEOMETRY_PARSER_LENGTH_FIELD_KEYS = Object.freeze([
   "seatTubeLength",
   "effectiveTopTube",
@@ -46,11 +43,6 @@ export const GEOMETRY_PARSER_ANGLE_FIELD_KEYS = Object.freeze([
 ]);
 
 export const GEOMETRY_PARSER_LENGTH_UNITS = Object.freeze(["mm", "cm", "in", "unknown"]);
-export const GEOMETRY_PARSER_RAW_ROW_UNIT_SOURCES = Object.freeze([
-  "explicit_row",
-  "global_default",
-  "unknown",
-]);
 
 export const GEOMETRY_PARSER_PLAUSIBILITY_RANGES = Object.freeze({
   stack: Object.freeze({ min: 350, max: 800, unit: "mm" }),
@@ -69,11 +61,10 @@ export const GEOMETRY_PARSER_PLAUSIBILITY_RANGES = Object.freeze({
 const rawTableRowSchema = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["label", "unit", "unitSource", "values"],
+  required: ["label", "unit", "values"],
   properties: {
     label: { type: "string", minLength: 1 },
     unit: { type: ["string", "null"] },
-    unitSource: { type: "string", enum: GEOMETRY_PARSER_RAW_ROW_UNIT_SOURCES },
     values: {
       type: "array",
       items: { type: ["number", "null"] },

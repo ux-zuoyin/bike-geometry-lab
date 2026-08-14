@@ -2,19 +2,13 @@ export const CM_GEOMETRY_SIZES = Object.freeze(["XS", "S", "M", "ML", "L", "XL"]
 
 const globalLengthRow = (label, values) => ({
   label,
-  // This deliberately preserves the misleading per-row unit returned by the
-  // earlier raw-table protocol. unitSource proves that it came from the table
-  // default rather than text explicitly attached to this row, so it must not
-  // override the image-wide centimetre statement.
-  unit: "mm",
-  unitSource: "global_default",
+  unit: null,
   values,
 });
 
 const explicitAngleRow = (label, values) => ({
   label,
   unit: "°",
-  unitSource: "explicit_row",
   values,
 });
 
@@ -30,7 +24,7 @@ export function createCmGeometryParserRawTableFixture() {
     detectedSizeCount: CM_GEOMETRY_SIZES.length,
     detectedSizes: [...CM_GEOMETRY_SIZES],
     rawRows: [
-      { label: "车架尺寸字母", unit: null, unitSource: "unknown", values: [null, null, null, null, null, null] },
+      { label: "车架尺寸字母", unit: null, values: [null, null, null, null, null, null] },
       globalLengthRow("车轮尺寸", [700, 700, 700, 700, 700, 700]),
       globalLengthRow("A － 座管", [44.4, 47.6, 50, 53.3, 55.3, 59.3]),
       explicitAngleRow("B － 座管角度", [73.5, 73.7, 73.5, 73.3, 73.3, 73.3]),

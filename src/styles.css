@@ -299,13 +299,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .geometry-import__parser-status ul::-webkit-scrollbar { display: none; }
 .geometry-import__parser-status li { color: rgba(244,246,248,.58); font-size: var(--font-size-xs); line-height: var(--line-height-body); }
 .geometry-import__parser-status li::before { content: "·"; margin-right: 6px; color: var(--status-warning); }
-.geometry-import__unit-confirmation { margin-top: 12px; display: grid; gap: 6px; color: var(--muted); font-size: var(--font-size-sm); line-height: var(--line-height-body); }
-.geometry-import__unit-confirmation strong { color: rgba(255,190,120,.92); font-size: var(--font-size-sm); }
-.geometry-import__unit-confirmation > div { display: flex; gap: 8px; }
-.geometry-import__unit-confirmation button { min-width: 58px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--control-bg); color: var(--control-text); font: inherit; font-weight: 650; cursor: pointer; }
-.geometry-import__unit-confirmation button:hover { background: var(--control-bg-hover); color: var(--control-text-hover); }
-.geometry-import__unit-confirmation.has-error > div { border-radius: 9px; box-shadow: 0 0 0 2px rgba(255,77,94,.42); }
-.geometry-import__unit-confirmation em { color: var(--status-error); font-size: var(--font-size-xs); font-style: normal; }
 .geometry-import__identity-fields { margin-top: 14px; display: grid; gap: 13px; }
 .geometry-import__identity-fields label { display: grid; gap: 6px; }
 .geometry-import__identity-fields label > span,
