@@ -40,6 +40,15 @@ export function normalizeExplicitGeometryUnits(mappedResponse, measurementContex
         LENGTH_FIELDS.has(field) ? convertLength(value, multiplier) : value,
       ])),
     })),
+    extendedGeometryBySize: Object.fromEntries(Object.entries(
+      mappedResponse.extendedGeometryBySize ?? {},
+    ).map(([size, geometry]) => [
+      size,
+      Object.fromEntries(Object.entries(geometry ?? {}).map(([field, value]) => [
+        field,
+        LENGTH_FIELDS.has(field) ? convertLength(value, multiplier) : value,
+      ])),
+    ])),
   };
 }
 

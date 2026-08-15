@@ -10,18 +10,25 @@ const GeometryImagePicker = lazyNamed(() => import("../import/GeometryImportFlow
 const GeometryImportFlow = lazyNamed(() => import("../import/GeometryImportFlow.jsx"), "GeometryImportFlow");
 
 const geometryDetails = [
-  { key: "seatTubeLengthMm", unit: "mm", zh: "座管长度", en: "Seat Tube" },
-  { key: "seatTubeAngleDeg", unit: "°", zh: "座管角", en: "Seat Tube Angle" },
-  { key: "headTubeAngleDeg", unit: "°", zh: "头管角", en: "Head Tube Angle" },
-  { key: "effectiveTopTubeMm", unit: "mm", zh: "有效上管", en: "Effective Top Tube" },
-  { key: "bbDropMm", unit: "mm", zh: "五通下沉", en: "BB Drop" },
-  { key: "chainstayMm", unit: "mm", zh: "后下叉长度", en: "Chainstay" },
-  { key: "forkOffsetMm", unit: "mm", zh: "前叉偏移", en: "Fork Offset" },
-  { key: "trailMm", unit: "mm", zh: "拖曳距", en: "Trail" },
-  { key: "standoverMm", unit: "mm", zh: "跨高", en: "Standover" },
+  { key: "seatTubeLength", unit: "mm", zh: "座管长度", en: "Seat Tube" },
+  { key: "seatTubeAngle", unit: "°", zh: "座管角", en: "Seat Tube Angle" },
+  { key: "headTubeAngle", unit: "°", zh: "头管角", en: "Head Tube Angle" },
+  { key: "effectiveTopTube", unit: "mm", zh: "有效上管", en: "Effective Top Tube" },
+  { key: "bbDrop", unit: "mm", zh: "五通下沉", en: "BB Drop" },
+  { key: "chainstay", unit: "mm", zh: "后下叉长度", en: "Chainstay" },
+  { key: "forkOffset", unit: "mm", zh: "前叉偏移", en: "Fork Offset" },
+  { key: "trail", source: "extended", unit: "mm", zh: "拖曳距", en: "Trail" },
+  { key: "standover", source: "extended", unit: "mm", zh: "跨高", en: "Standover" },
 ];
 
-const displayGeometryValue = (value) => (value == null || value === "" ? "未识别" : value);
+const geometrySummary = Object.freeze([
+  { key: "stack", label: "Stack" },
+  { key: "reach", label: "Reach" },
+  { key: "headTubeLength", label: "头管长度" },
+  { key: "wheelbase", label: "轴距" },
+]);
+
+const displayGeometryValue = (value) => (value == null || value === "" ? "未提供" : value);
 
 const seatStayStyleOptions = Object.freeze([
   { value: "low", label: "低" },
@@ -56,6 +63,8 @@ function GeometryTaskLauncher({ mode, onSelectImage, onStartManual }) {
 
 export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updateComponentSetup, geometryImport, workspaceTaskMode = null, isStageFullscreen = false }) {
   const sizeData = bike.sizeData;
+  const officialGeometry = bike.officialGeometry ?? sizeData?.officialGeometry ?? {};
+  const extendedGeometry = bike.extendedGeometry ?? sizeData?.extendedGeometry ?? {};
   const orderedSizes = sortBikeSizes(bike.sizes, { sourceOrder: bike.sizes });
   const isImportReady = geometryImport.status === "ready";
   const isTaskLauncherVisible = isImportReady && workspaceTaskMode != null;
@@ -161,12 +170,9 @@ export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updat
 
         <PanelSection title="几何摘要" hint="核心参数">
           <div className="geometry-grid">
-            {[
-              ["Stack", sizeData.stackMm],
-              ["Reach", sizeData.reachMm],
-              ["头管长度", sizeData.headTubeLengthMm],
-              ["轴距", sizeData.wheelbaseMm],
-            ].map(([label, value]) => (
+            {geometrySummary.map(({ key, label }) => {
+              const value = officialGeometry[key];
+              return (
               <div key={label}>
                 <span>{label}</span>
                 <div className="geometry-grid__value">
@@ -174,7 +180,8 @@ export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updat
                   <small aria-hidden={value == null}>{value != null ? "mm" : ""}</small>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </PanelSection>
 
@@ -203,15 +210,18 @@ export function FrameGeometryPanel({ bike, setFrameSize, setSeatStayStyle, updat
           )}
         >
           <dl className="geometry-detail-list">
-            {geometryDetails.map(({ key, unit, ...labels }) => (
-              <div key={key} data-geometry-field={key}>
+            {geometryDetails.map(({ key, source = "official", unit, ...labels }) => {
+              const value = source === "extended" ? extendedGeometry[key] : officialGeometry[key];
+              return (
+              <div key={key} data-geometry-field={key} data-geometry-source={source}>
                 <dt>{labels[geometryLanguage]}</dt>
                 <dd>
-                  <strong>{displayGeometryValue(sizeData[key])}</strong>
-                  <span aria-hidden={sizeData[key] == null}>{sizeData[key] != null ? unit : ""}</span>
+                  <strong>{displayGeometryValue(value)}</strong>
+                  <span aria-hidden={value == null}>{value != null ? unit : ""}</span>
                 </dd>
               </div>
-            ))}
+              );
+            })}
           </dl>
         </PanelSection>
           </>

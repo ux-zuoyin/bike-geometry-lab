@@ -1,9 +1,14 @@
 import {
+  CORE_GEOMETRY_FIELD_KEYS,
   GEOMETRY_PARSER_FIELDS,
   GEOMETRY_PARSER_FIELD_KEYS,
   GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
   GEOMETRY_PARSER_SCHEMA_VERSION,
 } from "./geometryParserSchema.js";
+import { getGeometryDataCompleteness } from "../lib/geometry/geometryCompleteness.js";
+
+const coreFields = new Set(CORE_GEOMETRY_FIELD_KEYS);
+const warningSeverities = new Set(["error", "warning", "info"]);
 
 const fieldLabels = Object.fromEntries(
   GEOMETRY_PARSER_FIELDS.map(({ key, label }) => [key, label]),
@@ -12,12 +17,13 @@ const fieldLabels = Object.fromEntries(
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const toSize = (value) => String(value ?? "").trim();
 
-function warning(code, message, field = null, size = null, value) {
+function warning(code, message, field = null, size = null, value, severity = "warning") {
   return {
     code,
     message,
     field,
     size,
+    severity,
     ...(value === undefined ? {} : { value }),
   };
 }
@@ -42,8 +48,22 @@ function sanitizeModelWarnings(value) {
       message: String(item.message).trim(),
       field: item.field == null ? null : String(item.field),
       size: item.size == null ? null : toSize(item.size),
+      severity: warningSeverities.has(item.severity)
+        ? item.severity
+        : (item.code === "RAW_ROW_COLUMN_COUNT_MISMATCH" ? "error" : "warning"),
     }];
   });
+}
+
+function sanitizeExtendedGeometryBySize(value, detectedSizes) {
+  if (!isRecord(value)) return Object.fromEntries(detectedSizes.map((size) => [size, {}]));
+  return Object.fromEntries(detectedSizes.map((size) => {
+    const source = isRecord(value[size]) ? value[size] : {};
+    return [size, Object.fromEntries(Object.entries(source).flatMap(([key, cell]) => {
+      const numericValue = cell == null || cell === "" ? null : Number(cell);
+      return Number.isFinite(numericValue) ? [[key, numericValue]] : [];
+    }))];
+  }));
 }
 
 function sanitizeUnrecognizedFields(value) {
@@ -165,6 +185,10 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
       return size ? [[size, entry]] : [];
     }),
   );
+  const extendedGeometryBySize = sanitizeExtendedGeometryBySize(
+    rawResponse.extendedGeometryBySize,
+    detectedSizes,
+  );
 
   const sizes = detectedSizes.map((size) => {
     const entry = entriesBySize.get(size);
@@ -173,7 +197,7 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
       appendWarning(
         warnings,
         seenWarnings,
-        warning("SIZE_COLUMN_MISSING", `${size} 尺码的几何数据列未被可靠识别。`, null, size),
+        warning("SIZE_COLUMN_MISSING", `${size} 尺码的几何数据列未被可靠识别。`, null, size, undefined, "error"),
       );
     }
 
@@ -192,6 +216,8 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
             `${size} 尺码 ${fieldLabels[field]} 未可靠识别。`,
             field,
             size,
+            undefined,
+            coreFields.has(field) ? "error" : "info",
           ),
         );
       } else {
@@ -206,6 +232,7 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
               field,
               size,
               value,
+              coreFields.has(field) ? "error" : "warning",
             ),
           );
         }
@@ -215,6 +242,25 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
 
     return { size, geometry };
   });
+
+  for (const size of detectedSizes) {
+    for (const [field, value] of Object.entries(extendedGeometryBySize[size] ?? {})) {
+      const range = GEOMETRY_PARSER_PLAUSIBILITY_RANGES[field];
+      if (!range || (value >= range.min && value <= range.max)) continue;
+      appendWarning(
+        warnings,
+        seenWarnings,
+        warning(
+          "GEOMETRY_VALUE_OUT_OF_RANGE",
+          `${size} 尺码的 ${field} 识别为 ${value} ${range.unit}，数值明显异常，已作为非阻塞扩展数据保留。`,
+          field,
+          size,
+          value,
+          "warning",
+        ),
+      );
+    }
+  }
 
   const fieldColumnCounts = Object.fromEntries(GEOMETRY_PARSER_FIELD_KEYS.map((field) => [
     field,
@@ -232,6 +278,9 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
           "REPORTED_COLUMN_COUNT_MISMATCH",
           `模型报告 ${fieldLabels[field]} 有 ${Number.isInteger(reportedCount) ? reportedCount : 0} 个值，服务端复核为 ${actualCount} 个。`,
           field,
+          null,
+          undefined,
+          coreFields.has(field) ? "warning" : "info",
         ),
       );
     }
@@ -243,16 +292,29 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
           "COLUMN_COUNT_MISMATCH",
           `检测到 ${detectedSizes.length} 个尺码，但 ${fieldLabels[field]} 仅识别到 ${actualCount} 个值，请人工确认。`,
           field,
+          null,
+          undefined,
+          coreFields.has(field) ? "error" : "info",
         ),
       );
     }
   }
 
-  const confirmationCount = warnings.filter(({ code }) => (
-    code === "CELL_UNRECOGNIZED"
-    || code === "SIZE_COLUMN_MISSING"
-    || code === "GEOMETRY_VALUE_OUT_OF_RANGE"
+  const confirmationCount = warnings.filter(({ code, severity }) => (
+    severity === "error"
+    && (
+      code === "CELL_UNRECOGNIZED"
+      || code === "SIZE_COLUMN_MISSING"
+      || code === "GEOMETRY_VALUE_OUT_OF_RANGE"
+    )
   )).length;
+  const completenessBySize = Object.fromEntries(sizes.map(({ size, geometry }) => [
+    size,
+    getGeometryDataCompleteness({
+      officialGeometry: geometry,
+      extendedGeometry: extendedGeometryBySize[size],
+    }),
+  ]));
 
   return {
     schemaVersion: GEOMETRY_PARSER_SCHEMA_VERSION,
@@ -262,6 +324,8 @@ export function validateAndNormalizeGeometryParserResponse(rawResponse) {
     sizes,
     warnings,
     confirmationCount,
+    completenessBySize,
+    extendedGeometryBySize,
     unrecognizedFields: sanitizeUnrecognizedFields(rawResponse.unrecognizedFields),
     rawRows: sanitizeRawRows(rawResponse.rawRows),
   };

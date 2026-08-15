@@ -1,6 +1,41 @@
 import { productionGeometryParserClient } from "./geometryParserClient.js";
-import { scopeGeometryImportWarnings } from "../state/geometryImportState.js";
+import {
+  isBlockingGeometryParserWarning,
+  scopeGeometryImportWarnings,
+} from "../state/geometryImportState.js";
 import { sortBikeSizes } from "../lib/geometry/sizeSorting.js";
+
+const EXTENDED_GEOMETRY_ALIASES = Object.freeze([
+  ["frontCenter", ["前轴距", "frontcenter"]],
+  ["forkLength", ["前叉长度", "forklength", "axletocrown"]],
+  ["trail", ["拖曳距", "trail"]],
+  ["standover", ["跨高", "standoverheight", "standover"]],
+]);
+
+const normalizeExtendedLabel = (value) => String(value ?? "")
+  .toLowerCase()
+  .replace(/^\s*[a-n]\s*[.\-—–－:：]\s*/i, "")
+  .replace(/[\s/＿_\-—–－()（）:：·.,，]/g, "");
+
+function getExtendedGeometryKey(sourceLabel) {
+  const normalized = normalizeExtendedLabel(sourceLabel);
+  return EXTENDED_GEOMETRY_ALIASES.find(([, aliases]) => (
+    aliases.some((alias) => normalized.includes(alias))
+  ))?.[0] ?? null;
+}
+
+function createExtendedGeometryBySize(response, detectedSizes) {
+  const extendedBySize = Object.fromEntries(detectedSizes.map((size) => [size, {}]));
+  for (const field of response.unrecognizedFields ?? []) {
+    const key = getExtendedGeometryKey(field.sourceLabel);
+    if (!key) continue;
+    detectedSizes.forEach((size, index) => {
+      const numericValue = Number(field.values?.[index]);
+      if (Number.isFinite(numericValue)) extendedBySize[size][key] = numericValue;
+    });
+  }
+  return extendedBySize;
+}
 
 function createParserDiagnostics(response) {
   if (!import.meta.env?.DEV) return undefined;
@@ -55,31 +90,57 @@ export function geometryParserResponseToDraft(response) {
   const candidateSizes = Object.fromEntries(
     response.sizes.map(({ size, geometry }) => [String(size), { ...geometry }]),
   );
+  const candidateValueSources = Object.fromEntries(
+    response.sizes.map(({ size, geometry }) => [String(size), Object.fromEntries(
+      Object.entries(geometry).map(([key, value]) => [key, value == null ? null : "ai"]),
+    )]),
+  );
   const detectedSizes = response.detectedSizes?.map(String) ?? Object.keys(candidateSizes);
+  const extractedExtendedGeometry = createExtendedGeometryBySize(response, detectedSizes);
+  const extendedGeometryBySize = Object.fromEntries(detectedSizes.map((size) => [
+    size,
+    {
+      ...extractedExtendedGeometry[size],
+      ...(response.extendedGeometryBySize?.[size] ?? {}),
+    },
+  ]));
   const selectedImportSizes = sortBikeSizes(
     detectedSizes.filter((size) => candidateSizes[size]),
     { sourceOrder: detectedSizes },
   );
   const allParserWarnings = response.warnings ?? [];
-  const parserWarnings = scopeGeometryImportWarnings(allParserWarnings, selectedImportSizes);
+  const scopedParserFeedback = scopeGeometryImportWarnings(allParserWarnings, selectedImportSizes);
+  const parserWarnings = scopedParserFeedback.filter(isBlockingGeometryParserWarning);
+  const parserNotices = scopedParserFeedback.filter((warning) => !isBlockingGeometryParserWarning(warning));
   const sizes = Object.fromEntries(selectedImportSizes.map((size) => [size, { ...candidateSizes[size] }]));
+  const valueSourcesBySize = Object.fromEntries(selectedImportSizes.map((size) => [
+    size,
+    { ...candidateValueSources[size] },
+  ]));
 
   const draft = {
+    entryMode: "ai",
+    geometryValueSource: "ai",
     brand: "",
     model: "",
     category: null,
     sizes,
     candidateSizes,
+    valueSourcesBySize,
+    candidateValueSources,
     selectedImportSizes,
     selectedSize: selectedImportSizes[0] ?? "",
     detectedSizes,
     detectedSizeCount: response.detectedSizeCount ?? detectedSizes.length,
     allParserWarnings,
     parserWarnings,
-    parserConfirmationCount: parserWarnings.filter((warning) => ["CELL_UNRECOGNIZED", "SIZE_COLUMN_MISSING", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)).length,
+    parserNotices,
+    parserConfirmationCount: parserWarnings.length,
+    completenessBySize: response.completenessBySize ?? {},
     unrecognizedFields: response.unrecognizedFields ?? [],
     parserMeta: response.meta ?? null,
     rawRows: response.rawRows ?? [],
+    extendedGeometryBySize,
   };
   const parserDiagnostics = createParserDiagnostics(response);
   return parserDiagnostics ? { ...draft, parserDiagnostics } : draft;

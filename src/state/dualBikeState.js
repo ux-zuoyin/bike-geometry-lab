@@ -1,8 +1,4 @@
-import {
-  getTrekDomaneSize,
-  toBikeGeometry,
-  trekDomane,
-} from "../data/bikes.js";
+import { trekDomane } from "../data/bikes.js";
 import { getSelectedImportSizes, importGeometryToSizeData } from "./geometryImportState.js";
 import {
   DEFAULT_ENDURANCE_SEAT_STAY_STYLE,
@@ -18,6 +14,10 @@ import {
   PRESET_EXPERIENCE_IDS,
   getPresetExperienceDefinition,
 } from "../data/presetExperience.js";
+import {
+  createStructuredGeometrySizeData,
+  toRendererGeometry,
+} from "../lib/geometry/renderGeometryResolver.js";
 
 export const ACTIVE_BIKES = Object.freeze(["a", "b"]);
 
@@ -37,6 +37,20 @@ const GEOMETRY_TO_SIZE_DATA_KEY = Object.freeze({
   stack: "stackMm",
 });
 
+const GEOMETRY_TO_CANONICAL_KEY = Object.freeze({
+  seatTube: "seatTubeLength",
+  seatAngle: "seatTubeAngle",
+  headTube: "headTubeLength",
+  headAngle: "headTubeAngle",
+  effectiveTopTube: "effectiveTopTube",
+  bbDrop: "bbDrop",
+  chainstay: "chainstay",
+  forkRake: "forkOffset",
+  wheelbase: "wheelbase",
+  reach: "reach",
+  stack: "stack",
+});
+
 function splitBikeColors(componentSetup) {
   const {
     frameColor,
@@ -51,11 +65,67 @@ function splitBikeColors(componentSetup) {
   };
 }
 
+function cloneSizeData(sizeData) {
+  const completeness = sizeData.completeness ? {
+    core: { ...sizeData.completeness.core },
+    precision: { ...sizeData.completeness.precision },
+    renderable: sizeData.completeness.renderable,
+  } : undefined;
+  return {
+    ...sizeData,
+    officialGeometry: { ...(sizeData.officialGeometry ?? {}) },
+    valueSources: { ...(sizeData.valueSources ?? {}) },
+    renderGeometry: { ...(sizeData.renderGeometry ?? {}) },
+    renderSources: { ...(sizeData.renderSources ?? {}) },
+    extendedGeometry: { ...(sizeData.extendedGeometry ?? {}) },
+    rawRows: (sizeData.rawRows ?? []).map((row) => ({ ...row, values: [...(row.values ?? [])] })),
+    geometrySources: { ...(sizeData.renderSources ?? sizeData.geometrySources ?? {}) },
+    geometrySourceCounts: { ...(sizeData.geometrySourceCounts ?? {}) },
+    completeness,
+    renderGeometryFidelity: sizeData.renderGeometryFidelity,
+  };
+}
+
+function structureGeometryBySize(entries, category, valueSource = "official") {
+  return Object.fromEntries(entries.map((sizeData) => [
+    String(sizeData.size),
+    createStructuredGeometrySizeData(sizeData, { category, valueSource }),
+  ]));
+}
+
+function activeGeometryState(sizeData) {
+  const officialGeometry = { ...(sizeData.officialGeometry ?? {}) };
+  const valueSources = { ...(sizeData.valueSources ?? {}) };
+  const renderGeometry = { ...(sizeData.renderGeometry ?? {}) };
+  const renderSources = { ...(sizeData.renderSources ?? {}) };
+  const extendedGeometry = { ...(sizeData.extendedGeometry ?? {}) };
+  const geometry = toRendererGeometry(renderGeometry);
+
+  geometry.trail = extendedGeometry.trail ?? null;
+  geometry.standover = extendedGeometry.standover ?? null;
+  return {
+    officialGeometry,
+    valueSources,
+    renderGeometry,
+    renderSources,
+    extendedGeometry,
+    // Legacy compact alias. Renderer entry points use renderGeometry directly.
+    geometry,
+    geometrySources: { ...renderSources },
+    geometryCompleteness: sizeData.completeness,
+    renderGeometryFidelity: sizeData.renderGeometryFidelity,
+    completeness: sizeData.completeness ? {
+      core: { ...sizeData.completeness.core },
+      precision: { ...sizeData.completeness.precision },
+      renderable: sizeData.completeness.renderable,
+    } : undefined,
+  };
+}
+
 export function createComparisonBike(id, setup, size = trekDomane.visualBaseSize) {
-  const sizeData = { ...getTrekDomaneSize(size) };
-  const geometryBySize = Object.fromEntries(
-    trekDomane.sizes.map((geometry) => [geometry.size, { ...geometry }]),
-  );
+  const category = normalizeBikeCategory(trekDomane.category);
+  const geometryBySize = structureGeometryBySize(trekDomane.sizes, category);
+  const sizeData = cloneSizeData(geometryBySize[String(size)] ?? geometryBySize[trekDomane.visualBaseSize]);
   const colorsAndComponents = splitBikeColors({ ...setup.componentSetup });
 
   return {
@@ -63,7 +133,7 @@ export function createComparisonBike(id, setup, size = trekDomane.visualBaseSize
     source: "preset",
     brand: trekDomane.brand.toUpperCase(),
     model: trekDomane.model,
-    category: normalizeBikeCategory(trekDomane.category),
+    category,
     categoryLabel: trekDomane.categoryLabel,
     seatStayStyle: DEFAULT_ENDURANCE_SEAT_STAY_STYLE,
     sourceLabel: "官方几何数据",
@@ -72,7 +142,7 @@ export function createComparisonBike(id, setup, size = trekDomane.visualBaseSize
     geometryBySize,
     size: String(size),
     sizeData,
-    geometry: { ...toBikeGeometry(sizeData) },
+    ...activeGeometryState(sizeData),
     frameColor: colorsAndComponents.frameColor,
     forkColor: colorsAndComponents.forkColor,
     fitSetup: { ...setup.fitSetup },
@@ -82,15 +152,13 @@ export function createComparisonBike(id, setup, size = trekDomane.visualBaseSize
 
 export function createPresetExperienceBike(presetId, setup, instanceId = `preset-experience-${presetId}`) {
   const definition = getPresetExperienceDefinition(presetId);
-  const geometryBySize = Object.fromEntries(
-    definition.sizes.map((geometry) => [geometry.size, { ...geometry }]),
-  );
+  const category = normalizeBikeCategory(definition.category);
+  const geometryBySize = structureGeometryBySize(definition.sizes, category);
   const size = geometryBySize[definition.visualBaseSize]
     ? definition.visualBaseSize
     : definition.sizes[0].size;
-  const sizeData = { ...geometryBySize[size] };
+  const sizeData = cloneSizeData(geometryBySize[size]);
   const colorsAndComponents = splitBikeColors({ ...setup.componentSetup });
-  const category = normalizeBikeCategory(definition.category);
 
   return {
     id: instanceId,
@@ -108,7 +176,7 @@ export function createPresetExperienceBike(presetId, setup, instanceId = `preset
     geometryBySize,
     size,
     sizeData,
-    geometry: { ...toBikeGeometry(sizeData) },
+    ...activeGeometryState(sizeData),
     frameColor: colorsAndComponents.frameColor,
     forkColor: colorsAndComponents.forkColor,
     fitSetup: { ...setup.fitSetup },
@@ -126,9 +194,9 @@ export function createPresetExperiencePack(setup) {
 export function instantiatePresetExperienceBike(presetBike, id) {
   if (!presetBike) return null;
   const geometryBySize = Object.fromEntries(
-    Object.entries(presetBike.geometryBySize ?? {}).map(([size, geometry]) => [size, { ...geometry }]),
+    Object.entries(presetBike.geometryBySize ?? {}).map(([size, geometry]) => [size, cloneSizeData(geometry)]),
   );
-  const sizeData = { ...(geometryBySize[presetBike.size] ?? presetBike.sizeData) };
+  const sizeData = cloneSizeData(geometryBySize[presetBike.size] ?? presetBike.sizeData);
 
   return {
     ...presetBike,
@@ -137,7 +205,7 @@ export function instantiatePresetExperienceBike(presetBike, id) {
     geometryBySize,
     sizes: [...presetBike.sizes],
     sizeData,
-    geometry: { ...toBikeGeometry(sizeData) },
+    ...activeGeometryState(sizeData),
     fitSetup: { ...presetBike.fitSetup },
     componentSetup: { ...presetBike.componentSetup },
   };
@@ -152,32 +220,36 @@ export function updateBikeSize(bike, size) {
   const sizeData = bike.geometryBySize?.[String(size)] ?? null;
   if (!sizeData) return bike;
 
-  const clonedSizeData = { ...sizeData };
+  const clonedSizeData = cloneSizeData(sizeData);
   return {
     ...bike,
     size: String(size),
     sizeData: clonedSizeData,
-    geometry: { ...toBikeGeometry(clonedSizeData) },
-    geometrySources: clonedSizeData.geometrySources ? { ...clonedSizeData.geometrySources } : undefined,
-    geometryCompleteness: clonedSizeData.geometryCompleteness ?? undefined,
+    ...activeGeometryState(clonedSizeData),
   };
 }
 
 export function createBikeFromGeometryImport(currentBike, draft, geometryImage = currentBike.geometryImage ?? null) {
   const selectedImportSizes = getSelectedImportSizes(draft);
-  const geometryValueSource = draft.geometryValueSource === "manual" ? "manual" : "official";
+  const geometryValueSource = draft.geometryValueSource === "manual" ? "manual" : "ai";
+  const category = normalizeBikeCategory(draft.category);
   const geometryBySize = Object.fromEntries(
     selectedImportSizes.map((size) => [
       String(size),
-      importGeometryToSizeData(size, draft.sizes?.[size] ?? draft.candidateSizes?.[size], geometryValueSource),
+      importGeometryToSizeData(size, draft.sizes?.[size] ?? draft.candidateSizes?.[size], {
+        valueSource: geometryValueSource,
+        valueSources: draft.valueSourcesBySize?.[size] ?? draft.candidateValueSources?.[size],
+        category,
+        extendedGeometry: draft.extendedGeometryBySize?.[size] ?? {},
+        rawRows: draft.rawRows ?? [],
+      }),
     ]),
   );
   const sizes = sortBikeSizes(selectedImportSizes, {
     sourceOrder: draft.detectedSizes ?? Object.keys(draft.candidateSizes ?? draft.sizes ?? {}),
   });
   const selectedSize = geometryBySize[draft.selectedSize] ? draft.selectedSize : sizes[0];
-  const sizeData = { ...geometryBySize[selectedSize] };
-  const category = normalizeBikeCategory(draft.category);
+  const sizeData = cloneSizeData(geometryBySize[selectedSize]);
 
   return {
     ...currentBike,
@@ -190,6 +262,12 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
       detectedSizeCount: draft.detectedSizeCount ?? Object.keys(draft.candidateSizes ?? draft.sizes ?? {}).length,
       selectedImportSizes: [...selectedImportSizes],
       candidateSizes: Object.fromEntries(Object.entries(draft.candidateSizes ?? draft.sizes ?? {}).map(([size, geometry]) => [size, { ...geometry }])),
+      candidateValueSources: Object.fromEntries(Object.entries(
+        draft.candidateValueSources ?? draft.valueSourcesBySize ?? {},
+      ).map(([size, sources]) => [size, { ...sources }])),
+      extendedGeometryBySize: Object.fromEntries(Object.entries(
+        draft.extendedGeometryBySize ?? {},
+      ).map(([size, geometry]) => [size, { ...geometry }])),
       rawRows: (draft.rawRows ?? []).map((row) => ({ ...row, values: [...(row.values ?? [])] })),
       parserWarnings: [...(draft.allParserWarnings ?? draft.parserWarnings ?? [])],
       unrecognizedFields: (draft.unrecognizedFields ?? []).map((field) => ({ ...field, values: [...(field.values ?? [])] })),
@@ -205,9 +283,8 @@ export function createBikeFromGeometryImport(currentBike, draft, geometryImage =
     geometryBySize,
     size: String(selectedSize),
     sizeData,
-    geometry: { ...toBikeGeometry(sizeData) },
-    geometrySources: sizeData.geometrySources ? { ...sizeData.geometrySources } : {},
-    geometryCompleteness: sizeData.geometryCompleteness ?? "exact",
+    ...activeGeometryState(sizeData),
+    rawRows: (draft.rawRows ?? []).map((row) => ({ ...row, values: [...(row.values ?? [])] })),
   };
 }
 
@@ -219,11 +296,34 @@ export function updateBikeGeometry(bike, geometryPatch) {
     const sizeDataKey = GEOMETRY_TO_SIZE_DATA_KEY[key];
     return sizeDataKey ? [[sizeDataKey, value]] : [];
   }));
+  const officialGeometry = { ...(bike.officialGeometry ?? bike.sizeData.officialGeometry ?? {}) };
+  const valueSources = { ...(bike.valueSources ?? bike.sizeData.valueSources ?? {}) };
+  for (const [key, value] of Object.entries(validPatch)) {
+    const canonicalKey = GEOMETRY_TO_CANONICAL_KEY[key];
+    if (!canonicalKey) continue;
+    officialGeometry[canonicalKey] = value;
+    valueSources[canonicalKey] = "manual";
+  }
+  const sizeData = createStructuredGeometrySizeData({
+    ...bike.sizeData,
+    ...sizeDataPatch,
+    officialGeometry,
+  }, {
+    category: bike.category,
+    valueSource: "manual",
+    valueSources,
+    extendedGeometry: bike.extendedGeometry,
+    rawRows: bike.rawRows,
+  });
 
   return {
     ...bike,
-    geometry: { ...bike.geometry, ...validPatch },
-    sizeData: { ...bike.sizeData, ...sizeDataPatch },
+    geometryBySize: {
+      ...bike.geometryBySize,
+      [bike.size]: sizeData,
+    },
+    sizeData,
+    ...activeGeometryState(sizeData),
   };
 }
 

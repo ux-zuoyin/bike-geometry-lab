@@ -6,7 +6,8 @@ import { getComparisonSlotLabel } from "../../state/workspaceBikes.js";
 function BikeCard({ bike, index, bikeCount, activeBikeIndex, onChange, onManage }) {
   const isSelected = activeBikeIndex === index;
   const label = getComparisonSlotLabel(index);
-  const strProfile = getSTRProfile(bike.geometry.stack, bike.geometry.reach);
+  const displayGeometry = bike.officialGeometry ?? bike.sizeData?.officialGeometry ?? {};
+  const strProfile = getSTRProfile(displayGeometry.stack, displayGeometry.reach);
   const cardLabel = `${bikeCount === 2 ? `${label} ` : ""}${bike.brand} ${bike.model}，${bike.size}码`;
 
   return (
@@ -44,8 +45,8 @@ function BikeCard({ bike, index, bikeCount, activeBikeIndex, onChange, onManage 
         )}
       </span>
       <span className="dual-bike-card__metrics">
-        <span>Stack <strong>{bike.geometry.stack}</strong> mm</span>
-        <span>Reach <strong>{bike.geometry.reach}</strong> mm</span>
+        <span>Stack <strong>{displayGeometry.stack}</strong> mm</span>
+        <span>Reach <strong>{displayGeometry.reach}</strong> mm</span>
       </span>
     </article>
   );
