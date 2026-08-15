@@ -104,11 +104,11 @@ export const GEOMETRY_WARNING_SEVERITIES = Object.freeze(["error", "warning", "i
 const rawTableRowSchema = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["label", "unit", "explicitUnit", "values"],
+  required: ["label", "values"],
   properties: {
     label: { type: "string", minLength: 1 },
     unit: { type: ["string", "null"] },
-    explicitUnit: { type: ["string", "null"], enum: ["mm", "cm", "inch", null] },
+    explicitUnit: { type: ["string", "null"] },
     values: {
       type: "array",
       items: { type: ["number", "null"] },
