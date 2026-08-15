@@ -27,8 +27,9 @@ Only when inputClassification.type is road_bike_geometry, continue with the raw 
 The image may contain multiple frame-size columns. Find the complete geometry table, determine whether sizes are rows or columns, and identify every size.
 Preserve every official size label exactly as printed and in source order. Never shorten, normalize, convert, or reinterpret a size label.
 Return the raw geometry table, not an interpretation into another schema. rawRows must include every detected source row, including rows whose meaning is uncertain or not useful to a bicycle renderer.
-For each raw row, preserve the source label text as printed, record its displayed unit when available, and provide one value per detected size in the exact source column order. Use null only for an unreadable cell; never delete an entire row because its field meaning is uncertain.
-For road_bike_geometry, also return measurementContext.defaultLengthUnit as exactly mm, cm, in, or unknown. Set it only from an explicit image-wide or table-wide unit statement, header, or footnote. If the image does not state a reliable default length unit, return unknown. Never infer the unit from numeric magnitude, decimal formatting, plausibility ranges, typical bicycle values, or prior knowledge. Preserve rawRows values exactly as printed and do not convert them.
+For each raw row, preserve the source label text as printed, record its displayed unit in unit when available, and provide one value per detected size in the exact source column order. Use null only for an unreadable cell; never delete an entire row because its field meaning is uncertain.
+For every raw row, explicitUnit must be exactly mm, cm, inch, or null. Set explicitUnit only when that same row visibly prints the unit in its own label or row cells, for example "Stack (cm)", "Reach | mm", or "Seat Tube Length (inch)". A table-wide note is not a row-level explicitUnit. Never copy a global unit into explicitUnit, infer it from numeric magnitude, or use bicycle knowledge.
+For road_bike_geometry, also return measurementContext.defaultLengthUnit as exactly mm, cm, inch, or unknown. Set it only from an explicit image-wide or table-wide unit statement, header, or footnote. If the image does not state a reliable default length unit, return unknown. Never infer the unit from numeric magnitude, decimal formatting, plausibility ranges, typical bicycle values, or prior knowledge. Preserve rawRows values exactly as printed and do not convert them.
 Do not infer a row's meaning from diagram letters such as A, B, C, D, E, F, G, H, I, J, or K. Do not omit rows such as Wheelbase, Fork Offset, Standover, or Chinese-labelled geometry rows merely because they may not exist in a downstream schema.
 Never drop a size because one or more cells are uncertain. Never shift a value into a neighboring size. Return only one valid JSON Object matching the requested raw-table fields.`;
 
@@ -38,6 +39,7 @@ function jsonResponse(body, status, origin, extraHeaders = {}) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      "X-Geometry-Parser-Protocol": PARSER_PROTOCOL_VERSION,
       ...(origin ? {
         "Access-Control-Allow-Origin": origin,
         Vary: "Origin",
@@ -140,12 +142,26 @@ function requireRawGeometryTable(structuredOutput) {
     });
   }
 
+  const defaultLengthUnit = structuredOutput?.measurementContext?.defaultLengthUnit;
+  if (!["mm", "cm", "inch", "unknown"].includes(defaultLengthUnit)) {
+    throw new GeometryParserValidationError("模型未返回有效的全局长度单位上下文，请重新识别。", {
+      code: "MEASUREMENT_CONTEXT_REQUIRED",
+    });
+  }
+
   for (const [rowIndex, row] of rawRows.entries()) {
     if (!row || typeof row !== "object" || Array.isArray(row)
       || !String(row.label ?? "").trim() || !Array.isArray(row.values)) {
       throw new GeometryParserValidationError("模型返回的原始几何表行不完整，请重新识别。", {
         code: "RAW_TABLE_ROW_INVALID",
         details: [{ rowIndex }],
+      });
+    }
+    if (!Object.prototype.hasOwnProperty.call(row, "explicitUnit")
+      || ![null, "mm", "cm", "inch"].includes(row.explicitUnit)) {
+      throw new GeometryParserValidationError("模型返回的行级明示单位无效，请重新识别。", {
+        code: "RAW_TABLE_ROW_EXPLICIT_UNIT_INVALID",
+        details: [{ rowIndex, label: String(row.label).trim() }],
       });
     }
     if (row.values.length !== detectedSizes.length) {
@@ -242,6 +258,8 @@ export function createGeometryParserWorker({
         const validated = validateAndNormalizeGeometryParserResponse(unitNormalizedResponse);
         return jsonResponse({
           ...validated,
+          measurementContext: providerResult.structuredOutput.measurementContext ?? null,
+          fieldUnits: unitNormalizedResponse?.fieldUnits ?? {},
           ...(inputClassification ? { inputClassification } : {}),
           meta: {
             ...(providerResult?.meta && typeof providerResult.meta === "object" ? providerResult.meta : {}),

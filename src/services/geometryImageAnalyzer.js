@@ -52,6 +52,9 @@ function createParserDiagnostics(response) {
     requestId: meta.requestId ?? null,
     elapsedMs: meta.elapsedMs ?? null,
     parserProtocolVersion: meta.parserProtocolVersion ?? null,
+    schemaVersion: response.schemaVersion ?? null,
+    measurementContext: response.measurementContext ?? null,
+    fieldUnits: response.fieldUnits ?? {},
   };
 
   if (typeof console !== "undefined") {
@@ -59,13 +62,20 @@ function createParserDiagnostics(response) {
     console.log("Provider", diagnostics.provider);
     console.log("Model", diagnostics.model);
     console.log("Parser Protocol Version", diagnostics.parserProtocolVersion);
+    console.log("Schema Version", diagnostics.schemaVersion);
+    console.log("Default Length Unit", diagnostics.measurementContext?.defaultLengthUnit ?? null);
+    console.log("Field Units", diagnostics.fieldUnits);
     console.log("Input Classification", inputClassification?.type ?? null);
     console.log("Detected Bike Type", inputClassification?.detectedBikeType ?? null);
     console.log("Classification Confidence", inputClassification?.confidence ?? null);
     console.log("Classification Reason", inputClassification?.reason ?? null);
     console.log("Detected Sizes", response.detectedSizes ?? []);
     console.log("Raw Row Count", rawRows.length);
-    console.log("Raw Rows", rawRows.map((row) => ({ label: row.label, values: row.values })));
+    console.log("Raw Rows", rawRows.map((row) => ({
+      label: row.label,
+      explicitUnit: row.explicitUnit ?? null,
+      values: row.values,
+    })));
     console.log("Unrecognized Fields", response.unrecognizedFields ?? []);
     console.groupEnd();
   }

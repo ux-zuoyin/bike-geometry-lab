@@ -1,4 +1,7 @@
-import { GEOMETRY_PARSER_FIELD_KEYS } from "./geometryParserSchema.js";
+import {
+  GEOMETRY_PARSER_FIELD_KEYS,
+  GEOMETRY_PARSER_LENGTH_FIELD_KEYS,
+} from "./geometryParserSchema.js";
 
 const FIELD_ALIASES = Object.freeze([
   { field: "stack", priority: 200, aliases: ["车架堆高", "堆高", "stack"] },
@@ -47,10 +50,19 @@ const EXTENDED_SEMANTICS = new Set([
 
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const toSize = (value) => String(value ?? "").trim();
+const FIELD_UNIT_KEYS = new Set(GEOMETRY_PARSER_LENGTH_FIELD_KEYS);
 const normalizeLabel = (value) => String(value ?? "")
   .toLowerCase()
   .replace(/^\s*[a-n]\s*[.\-—–－:：]\s*/i, "")
   .replace(/[\s/＿_\-—–－()（）:：·.,，]/g, "");
+
+function getExplicitLengthUnitFromLabel(label) {
+  const source = String(label ?? "").toLowerCase();
+  if (/(^|[^a-z])mm([^a-z]|$)|毫米/.test(source)) return "mm";
+  if (/(^|[^a-z])cm([^a-z]|$)|厘米/.test(source)) return "cm";
+  if (/(^|[^a-z])(inch|inches|in)([^a-z]|$)|英寸/.test(source)) return "inch";
+  return null;
+}
 
 function warning(code, message, field = null, size = null) {
   return { code, message, field, size };
@@ -106,6 +118,7 @@ function normalizeRawRows(value, sizeCount, warnings) {
     return [{
       label: toSize(row.label),
       unit: row.unit == null || row.unit === "" ? null : String(row.unit).trim(),
+      explicitUnit: getExplicitLengthUnitFromLabel(row.label),
       values,
       sourceIndex: rowIndex,
     }];
@@ -174,6 +187,11 @@ export function mapRawGeometryTableToParserResponse(rawResponse) {
     ))),
   ]));
 
+  const fieldUnits = Object.fromEntries([...FIELD_UNIT_KEYS].map((field) => {
+    const row = rowsByField.get(field)?.row ?? extendedRowsByKey.get(field) ?? null;
+    return [field, { explicitUnit: row?.explicitUnit ?? null }];
+  }));
+
   const fieldColumnCounts = Object.fromEntries(GEOMETRY_PARSER_FIELD_KEYS.map((field) => [
     field,
     sizes.reduce((count, entry) => count + (entry.geometry[field] == null ? 0 : 1), 0),
@@ -187,6 +205,11 @@ export function mapRawGeometryTableToParserResponse(rawResponse) {
     warnings,
     unrecognizedFields,
     extendedGeometryBySize,
+    fieldUnits,
     rawRows,
   };
 }
+
+export const __geometryParserRawTableMapperInternals = Object.freeze({
+  getExplicitLengthUnitFromLabel,
+});
