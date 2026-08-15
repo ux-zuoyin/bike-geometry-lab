@@ -81,7 +81,7 @@ export const GEOMETRY_PARSER_ANGLE_FIELD_KEYS = Object.freeze([
   "headTubeAngle",
 ]);
 
-export const GEOMETRY_PARSER_LENGTH_UNITS = Object.freeze(["mm", "cm", "in", "unknown"]);
+export const GEOMETRY_PARSER_LENGTH_UNITS = Object.freeze(["mm", "cm", "inch", "unknown"]);
 
 export const GEOMETRY_PARSER_PLAUSIBILITY_RANGES = Object.freeze({
   stack: Object.freeze({ min: 350, max: 800, unit: "mm" }),
@@ -104,10 +104,11 @@ export const GEOMETRY_WARNING_SEVERITIES = Object.freeze(["error", "warning", "i
 const rawTableRowSchema = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["label", "unit", "values"],
+  required: ["label", "unit", "explicitUnit", "values"],
   properties: {
     label: { type: "string", minLength: 1 },
     unit: { type: ["string", "null"] },
+    explicitUnit: { type: ["string", "null"], enum: ["mm", "cm", "inch", null] },
     values: {
       type: "array",
       items: { type: ["number", "null"] },
@@ -118,7 +119,7 @@ const rawTableRowSchema = Object.freeze({
 export const GEOMETRY_PARSER_RAW_TABLE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["inputClassification"],
+  required: ["inputClassification", "measurementContext"],
   properties: {
     inputClassification: {
       type: "object",

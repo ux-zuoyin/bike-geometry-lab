@@ -97,17 +97,18 @@ test("raw-table provider schema requires source rows with aligned values", () =>
   assert.deepEqual(GEOMETRY_PARSER_INPUT_TYPES, [
     "road_bike_geometry", "unsupported_bike_geometry", "not_geometry", "unreadable",
   ]);
-  assert.deepEqual(GEOMETRY_PARSER_RAW_TABLE_SCHEMA.required, ["inputClassification"]);
+  assert.deepEqual(GEOMETRY_PARSER_RAW_TABLE_SCHEMA.required, ["inputClassification", "measurementContext"]);
   assert.deepEqual(
     GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.inputClassification.properties.type.enum,
     GEOMETRY_PARSER_INPUT_TYPES,
   );
   const rawRowSchema = GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.rawRows.items;
-  assert.deepEqual(rawRowSchema.required, ["label", "unit", "values"]);
+  assert.deepEqual(rawRowSchema.required, ["label", "unit", "explicitUnit", "values"]);
+  assert.deepEqual(rawRowSchema.properties.explicitUnit.enum, ["mm", "cm", "inch", null]);
   assert.deepEqual(rawRowSchema.properties.values.items.type, ["number", "null"]);
   assert.deepEqual(
     GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.measurementContext.properties.defaultLengthUnit.enum,
-    ["mm", "cm", "in", "unknown"],
+    ["mm", "cm", "inch", "unknown"],
   );
 
   const geometrySchema = GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA
@@ -167,7 +168,11 @@ test("explicit centimetre context normalizes mapped lengths once and preserves a
   assert.equal(validated.completenessBySize.XS.renderable, true);
   assert.equal(validated.extendedGeometryBySize.XS.trail, 62);
   assert.equal(validated.extendedGeometryBySize.XS.standover, 721);
-  assert.equal(normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "unknown" }), mapped);
+  const unresolved = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "unknown" });
+  assert.deepEqual(unresolved.sizes, mapped.sizes);
+  assert.ok(unresolved.warnings.some(({ code, severity }) => (
+    code === "LENGTH_UNIT_UNRESOLVED" && severity === "error"
+  )));
 });
 
 test("explicit millimetre context is an identity transform for the complete QUICK baseline", () => {
@@ -176,11 +181,143 @@ test("explicit millimetre context is an identity transform for the complete QUIC
   const normalized = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "mm" });
   const validated = validateAndNormalizeGeometryParserResponse(normalized);
 
+  assert.strictEqual(normalized, mapped);
   assert.deepEqual(normalized, mapped);
   assert.deepEqual(validated.detectedSizes, QUICK_SIZES);
   for (const entry of validated.sizes) {
     assert.deepEqual(entry.geometry, QUICK_GEOMETRY[entry.size]);
   }
+});
+
+test("Synapse row-level centimetres override an unknown global unit", () => {
+  const rawTable = {
+    inputClassification: createInputClassification("road_bike_geometry"),
+    measurementContext: { defaultLengthUnit: "unknown" },
+    detectedSizeCount: 1,
+    detectedSizes: ["54"],
+    rawRows: [
+      { label: "Stack (cm)", unit: "cm", explicitUnit: "cm", values: [57] },
+      { label: "Reach (cm)", unit: "cm", explicitUnit: "cm", values: [38.1] },
+      { label: "Head Tube Length (cm)", unit: "cm", explicitUnit: "cm", values: [15] },
+      { label: "Head Tube Angle", unit: "°", explicitUnit: null, values: [71.3] },
+      { label: "Seat Tube Angle", unit: "°", explicitUnit: null, values: [73] },
+      { label: "Chain Stay Length (cm)", unit: "cm", explicitUnit: "cm", values: [42.5] },
+      { label: "Bottom Bracket Drop (cm)", unit: "cm", explicitUnit: "cm", values: [7.3] },
+    ],
+  };
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, rawTable.measurementContext);
+  const geometry = normalized.sizes[0].geometry;
+
+  assert.equal(mapped.fieldUnits.stack.explicitUnit, "cm");
+  assert.deepEqual({
+    stack: geometry.stack,
+    reach: geometry.reach,
+    headTubeLength: geometry.headTubeLength,
+    headTubeAngle: geometry.headTubeAngle,
+    seatTubeAngle: geometry.seatTubeAngle,
+    chainstay: geometry.chainstay,
+    bbDrop: geometry.bbDrop,
+  }, {
+    stack: 570,
+    reach: 381,
+    headTubeLength: 150,
+    headTubeAngle: 71.3,
+    seatTubeAngle: 73,
+    chainstay: 425,
+    bbDrop: 73,
+  });
+});
+
+test("Domane rows without explicit units inherit the global centimetre context", () => {
+  const rawTable = createCmGeometryParserRawTableFixture();
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, rawTable.measurementContext);
+  const geometry = normalized.sizes.find(({ size }) => size === "M").geometry;
+
+  assert.equal(mapped.fieldUnits.stack.explicitUnit, null);
+  assert.equal(mapped.fieldUnits.reach.explicitUnit, null);
+  assert.deepEqual({
+    stack: geometry.stack,
+    reach: geometry.reach,
+    headTubeLength: geometry.headTubeLength,
+    headTubeAngle: geometry.headTubeAngle,
+    seatTubeAngle: geometry.seatTubeAngle,
+    chainstay: geometry.chainstay,
+    bbDrop: geometry.bbDrop,
+  }, {
+    stack: 575,
+    reach: 374,
+    headTubeLength: 159,
+    headTubeAngle: 71.2,
+    seatTubeAngle: 73.5,
+    chainstay: 420,
+    bbDrop: 80,
+  });
+});
+
+test("mixed explicit mm rows override a global cm unit and angles remain unchanged", () => {
+  const rawTable = {
+    detectedSizeCount: 1,
+    detectedSizes: ["M"],
+    rawRows: [
+      { label: "Stack | mm", unit: "mm", explicitUnit: "mm", values: [575] },
+      { label: "Reach", unit: null, explicitUnit: null, values: [37.4] },
+      { label: "Head Tube Angle", unit: "°", explicitUnit: null, values: [71.2] },
+    ],
+  };
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "cm" });
+  const geometry = normalized.sizes[0].geometry;
+
+  assert.equal(geometry.stack, 575);
+  assert.equal(geometry.reach, 374);
+  assert.equal(geometry.headTubeAngle, 71.2);
+});
+
+test("a hallucinated legacy or explicit row unit without label evidence cannot override global cm", () => {
+  const rawTable = {
+    detectedSizeCount: 1,
+    detectedSizes: ["M"],
+    rawRows: [
+      { label: "Stack", unit: "mm", explicitUnit: "mm", values: [57.5] },
+    ],
+  };
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "cm" });
+
+  assert.equal(mapped.rawRows[0].unit, "mm");
+  assert.equal(mapped.rawRows[0].explicitUnit, null);
+  assert.equal(mapped.fieldUnits.stack.explicitUnit, null);
+  assert.equal(normalized.sizes[0].geometry.stack, 575);
+});
+
+test("unknown length units preserve values without magnitude inference and emit a unit error", () => {
+  const rawTable = {
+    detectedSizeCount: 1,
+    detectedSizes: ["M"],
+    rawRows: [
+      { label: "Stack", unit: null, explicitUnit: null, values: [57.5] },
+      { label: "Head Tube Angle", unit: "°", explicitUnit: null, values: [71.2] },
+    ],
+  };
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "unknown" });
+
+  assert.equal(normalized.sizes[0].geometry.stack, 57.5);
+  assert.equal(normalized.sizes[0].geometry.headTubeAngle, 71.2);
+  assert.deepEqual(normalized.warnings.find(({ code }) => code === "LENGTH_UNIT_UNRESOLVED"), {
+    code: "LENGTH_UNIT_UNRESOLVED",
+    message: "无法确定长度字段的明示单位：stack。请确认原图的行级或全局单位。",
+    field: null,
+    size: null,
+    severity: "error",
+  });
+  assert.equal(
+    validateAndNormalizeGeometryParserResponse(normalized).warnings
+      .find(({ code }) => code === "LENGTH_UNIT_UNRESOLVED")?.severity,
+    "error",
+  );
 });
 
 test("raw QUICK table preserves Wheelbase and Fork Offset rows before deterministic mapping", () => {
@@ -647,6 +784,7 @@ test("worker validates an injected fixture provider result without network acces
   assert.deepEqual(payload.detectedSizes, QUICK_SIZES);
   assert.equal(payload.meta.provider, "fixture");
   assert.equal(payload.meta.parserProtocolVersion, "raw-table-v3-explicit-unit");
+  assert.equal(response.headers.get("X-Geometry-Parser-Protocol"), "raw-table-v3-explicit-unit");
 });
 
 test("road-bike classification enters Raw Table mapping with one provider request", async () => {
@@ -670,6 +808,9 @@ test("qwen raw-table path applies only an explicit centimetre context before val
 
   assert.equal(response.status, 200);
   assert.equal(payload.meta.parserProtocolVersion, "raw-table-v3-explicit-unit");
+  assert.equal(payload.schemaVersion, "2");
+  assert.equal(payload.measurementContext.defaultLengthUnit, "cm");
+  assert.equal(payload.fieldUnits.stack.explicitUnit, null);
   assert.equal(xs.stack, 524);
   assert.equal(xs.reach, 368);
   assert.equal(xs.seatTubeLength, 444);
@@ -813,6 +954,17 @@ test("qwen rejects raw rows whose value count does not match the detected sizes"
     valueCount: 4,
     detectedSizeCount: 5,
   }]);
+});
+
+test("qwen requires an explicit-unit field for every road-bike raw row", async () => {
+  const rawTable = createQuickGeometryParserRawTableFixture();
+  delete rawTable.rawRows[0].explicitUnit;
+  const response = await requestQwenFixture(rawTable);
+  const payload = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.equal(payload.error.code, "RAW_TABLE_ROW_EXPLICIT_UNIT_INVALID");
+  assert.deepEqual(payload.error.details, [{ rowIndex: 0, label: "尺寸/座管长度" }]);
 });
 
 test("worker requests raw table extraction and maps source labels deterministically", async () => {

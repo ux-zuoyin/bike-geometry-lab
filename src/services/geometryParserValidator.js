@@ -91,6 +91,9 @@ function sanitizeRawRows(value) {
     return [{
       label: String(item.label).trim(),
       unit: item.unit == null || item.unit === "" ? null : String(item.unit).trim(),
+      explicitUnit: item.explicitUnit == null || item.explicitUnit === ""
+        ? null
+        : String(item.explicitUnit).trim(),
       values: Array.isArray(item.values)
         ? item.values.map((cell) => {
           const numericValue = cell == null || cell === "" ? null : Number(cell);
