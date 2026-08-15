@@ -17,6 +17,7 @@ import { resolveFrameVisualPreset } from "../../config/bikeArchetypes.js";
 import { resolveComponentSetup } from "../../config/bikeComponents.js";
 import { toGeometryFit } from "../../config/fitSetup.js";
 import { getRenderableComponentSetup } from "../../state/dualBikeState.js";
+import { toRendererGeometry } from "../../lib/geometry/renderGeometryResolver.js";
 import { DualBikeControls } from "../comparison/DualBikeControls.jsx";
 import { PresetExperienceControls } from "../preset/PresetExperienceControls.jsx";
 import { Switch } from "../ui/Stepper.jsx";
@@ -34,9 +35,12 @@ function useBikeRenderModel(bike) {
   return useMemo(() => {
     if (!bike) return null;
     const fit = toGeometryFit(bike.fitSetup);
+    const rendererGeometry = bike.renderGeometry
+      ? toRendererGeometry(bike.renderGeometry)
+      : bike.geometry;
     return {
       bike,
-      data: buildBikeGeometry(bike.geometry, fit),
+      data: buildBikeGeometry(rendererGeometry, fit),
       componentSetup: resolveComponentSetup(getRenderableComponentSetup(bike)),
     };
   }, [bike]);
@@ -124,9 +128,11 @@ export function BikeVisualizer({
   const renderModels = isComparisonVisible ? [secondaryModel, primaryModel] : [primaryModel];
   const bike = primaryModel?.bike ?? null;
   const data = primaryModel?.data ?? null;
+  const wheelbaseRenderSource = bike?.renderSources?.wheelbase;
+  const wheelbaseIsEstimated = wheelbaseRenderSource === "derived" || wheelbaseRenderSource === "template";
   const primarySourceId = bike ? getBikeVisualSourceId(bike.id) : "";
   const project = useMemo(() => createProjector(), []);
-  const wheelbaseY = bike ? bike.geometry.bbDrop - WHEEL_RADIUS - 44 : 0;
+  const wheelbaseY = data ? data.geometry.bbDrop - WHEEL_RADIUS - 44 : 0;
   const rearAxle = data ? project(data.frame.rearAxle) : null;
   const frontAxle = data ? project(data.frame.frontAxle) : null;
   const wheelOuterRadius = RENDERED_WHEEL_DIAMETER_PX / 2;
@@ -226,7 +232,7 @@ export function BikeVisualizer({
           data-reference-wheel-diameter-mm={REFERENCE_WHEEL_OUTER_DIAMETER_MM}
           data-rendered-wheel-diameter-px={RENDERED_WHEEL_DIAMETER_PX}
           data-pixels-per-mm={PIXELS_PER_MM.toFixed(9)}
-          data-wheelbase-wheel-ratio={bike ? (bike.geometry.wheelbase / REFERENCE_WHEEL_OUTER_DIAMETER_MM).toFixed(6) : undefined}
+          data-wheelbase-wheel-ratio={data ? (data.geometry.wheelbase / REFERENCE_WHEEL_OUTER_DIAMETER_MM).toFixed(6) : undefined}
           data-stage-ground-y={groundAlignment.stageGroundY.toFixed(3)}
           data-stage-ground-y-px={groundAlignment.stageGroundYPx.toFixed(3)}
           data-bike-ground-y={bikeGroundY.toFixed(3)}
@@ -284,35 +290,35 @@ export function BikeVisualizer({
               <g className="dimensions">
                 <DimensionLine
                   start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: bike.geometry.stack }}
+                  end={{ x: 0, y: data.geometry.stack }}
                   label="STACK"
-                  value={`${bike.geometry.stack} mm`}
+                  value={`${data.geometry.stack} mm`}
                   orientation="vertical"
                   project={project}
                 />
                 <DimensionLine
-                  start={{ x: 0, y: bike.geometry.stack + 64 }}
-                  end={{ x: bike.geometry.reach, y: bike.geometry.stack + 64 }}
+                  start={{ x: 0, y: data.geometry.stack + 64 }}
+                  end={{ x: data.geometry.reach, y: data.geometry.stack + 64 }}
                   label="REACH"
-                  value={`${bike.geometry.reach} mm`}
+                  value={`${data.geometry.reach} mm`}
                   project={project}
                 />
                 <DimensionLine
                   start={{ x: data.frame.rearAxle.x, y: wheelbaseY }}
                   end={{ x: data.frame.frontAxle.x, y: wheelbaseY }}
                   label="WHEELBASE"
-                  value={`${bike.geometry.wheelbase} mm`}
+                  value={`${wheelbaseIsEstimated ? "≈" : ""}${data.geometry.wheelbase} mm`}
                   project={project}
                 />
                 <AngleIndicator
                   point={{ x: data.frame.seatTop.x - 150, y: data.frame.seatTop.y - 95 }}
-                  value={bike.geometry.seatAngle.toFixed(1)}
+                  value={data.geometry.seatAngle.toFixed(1)}
                   label="SEAT TUBE"
                   project={project}
                 />
                 <AngleIndicator
                   point={{ x: data.frame.headTop.x + 245, y: data.frame.headBottom.y - 105 }}
-                  value={bike.geometry.headAngle.toFixed(1)}
+                  value={data.geometry.headAngle.toFixed(1)}
                   label="HEAD TUBE"
                   align="end"
                   project={project}

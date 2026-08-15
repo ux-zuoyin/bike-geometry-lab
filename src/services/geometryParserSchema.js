@@ -1,4 +1,34 @@
-export const GEOMETRY_PARSER_SCHEMA_VERSION = "1";
+export const GEOMETRY_PARSER_SCHEMA_VERSION = "2";
+
+export const CORE_GEOMETRY_FIELD_KEYS = Object.freeze([
+  "stack",
+  "reach",
+  "headTubeLength",
+  "headTubeAngle",
+  "seatTubeAngle",
+  "chainstay",
+  "bbDrop",
+]);
+
+export const PRECISION_GEOMETRY_FIELD_KEYS = Object.freeze([
+  "wheelbase",
+  "effectiveTopTube",
+  "seatTubeLength",
+  "forkOffset",
+  "frontCenter",
+  "forkLength",
+]);
+
+export const REFERENCE_GEOMETRY_FIELD_KEYS = Object.freeze([
+  "trail",
+  "standover",
+  "bbHeight",
+  "topTubeActual",
+  "str",
+  "handlebarWidth",
+  "stemLength",
+  "crankLength",
+]);
 
 export const GEOMETRY_PARSER_INPUT_TYPES = Object.freeze([
   "road_bike_geometry",
@@ -35,6 +65,15 @@ export const GEOMETRY_PARSER_LENGTH_FIELD_KEYS = Object.freeze([
   "bbDrop",
   "reach",
   "stack",
+  "frontCenter",
+  "forkLength",
+  "trail",
+  "standover",
+  "bbHeight",
+  "topTubeActual",
+  "handlebarWidth",
+  "stemLength",
+  "crankLength",
 ]);
 
 export const GEOMETRY_PARSER_ANGLE_FIELD_KEYS = Object.freeze([
@@ -56,7 +95,11 @@ export const GEOMETRY_PARSER_PLAUSIBILITY_RANGES = Object.freeze({
   wheelbase: Object.freeze({ min: 850, max: 1300, unit: "mm" }),
   bbDrop: Object.freeze({ min: 30, max: 120, unit: "mm" }),
   forkOffset: Object.freeze({ min: 25, max: 80, unit: "mm" }),
+  frontCenter: Object.freeze({ min: 450, max: 850, unit: "mm" }),
+  forkLength: Object.freeze({ min: 300, max: 500, unit: "mm" }),
 });
+
+export const GEOMETRY_WARNING_SEVERITIES = Object.freeze(["error", "warning", "info"]);
 
 const rawTableRowSchema = Object.freeze({
   type: "object",
@@ -128,6 +171,8 @@ export const GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA = Object.freeze({
     "sizes",
     "warnings",
     "unrecognizedFields",
+    "completenessBySize",
+    "extendedGeometryBySize",
   ],
   properties: {
     detectedSizeCount: { type: "integer", minimum: 0 },
@@ -163,13 +208,52 @@ export const GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["code", "message", "field", "size"],
+        required: ["code", "message", "field", "size", "severity"],
         properties: {
           code: { type: "string", minLength: 1 },
           message: { type: "string", minLength: 1 },
           field: { type: ["string", "null"] },
           size: { type: ["string", "null"] },
+          severity: { type: "string", enum: GEOMETRY_WARNING_SEVERITIES },
+          value: { type: "number" },
         },
+      },
+    },
+    completenessBySize: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        additionalProperties: false,
+        required: ["core", "precision", "renderable"],
+        properties: {
+          core: {
+            type: "object",
+            additionalProperties: false,
+            required: ["total", "available", "complete"],
+            properties: {
+              total: { type: "integer", minimum: 0 },
+              available: { type: "integer", minimum: 0 },
+              complete: { type: "boolean" },
+            },
+          },
+          precision: {
+            type: "object",
+            additionalProperties: false,
+            required: ["total", "available"],
+            properties: {
+              total: { type: "integer", minimum: 0 },
+              available: { type: "integer", minimum: 0 },
+            },
+          },
+          renderable: { type: "boolean" },
+        },
+      },
+    },
+    extendedGeometryBySize: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        additionalProperties: nullableNumberSchema,
       },
     },
     unrecognizedFields: {
@@ -181,6 +265,11 @@ export const GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA = Object.freeze({
         properties: {
           sourceLabel: { type: "string" },
           reason: { type: "string" },
+          unit: { type: ["string", "null"] },
+          values: {
+            type: "array",
+            items: nullableNumberSchema,
+          },
         },
       },
     },

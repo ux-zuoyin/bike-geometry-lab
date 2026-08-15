@@ -156,11 +156,13 @@ import {
   createManualGeometryImportDraft,
   GEOMETRY_IMPORT_FIELDS,
   GEOMETRY_IMPORT_STATUSES,
+  getGeometryImportDraftFieldValue,
   getGeometryDraftSourceCounts,
   getGeometryImportPreviewIssues,
   importGeometryToSizeData,
   isGeometryImportPreviewSafe,
   MANUAL_GEOMETRY_SIZE_PLACEHOLDER,
+  PRECISION_GEOMETRY_IMPORT_FIELDS,
   renameGeometryImportDraftSize,
   resolveGeometryImportPreview,
   STRUCTURAL_GEOMETRY_FIELD_KEYS,
@@ -168,6 +170,10 @@ import {
   updateGeometryImportDraftField,
   validateGeometryImportDraft,
 } from "../src/state/geometryImportState.js";
+import {
+  createStructuredGeometrySizeData,
+  resolveRenderGeometry,
+} from "../src/lib/geometry/renderGeometryResolver.js";
 import {
   MAX_BIKES,
   addWorkspaceBike,
@@ -218,6 +224,10 @@ const roadBikeVisualSource = readFileSync(
 );
 const dualBikeControlsSource = readFileSync(
   new URL("../src/components/comparison/DualBikeControls.jsx", import.meta.url),
+  "utf8",
+);
+const comparisonDockSource = readFileSync(
+  new URL("../src/components/comparison/ComparisonDock.jsx", import.meta.url),
   "utf8",
 );
 const presetExperienceControlsSource = readFileSync(
@@ -894,7 +904,7 @@ test("workspace bikes keep Geometry, Fit Setup, and Components independent", () 
   assert.doesNotMatch(appSource + bikeVisualizerSource, /viewMode|compareFocus/);
   assert.match(dualBikeControlsSource, /role="group" aria-label="当前车型"/);
   assert.match(dualBikeControlsSource, /type="checkbox"[\s\S]*checked=\{compareEnabled\}/);
-  assert.match(dualBikeControlsSource, /className="dual-bike-card__metrics"[\s\S]*Stack[\s\S]*bike\.geometry\.stack[\s\S]*Reach[\s\S]*bike\.geometry\.reach/);
+  assert.match(dualBikeControlsSource, /const displayGeometry = bike\.officialGeometry[\s\S]*className="dual-bike-card__metrics"[\s\S]*Stack[\s\S]*displayGeometry\.stack[\s\S]*Reach[\s\S]*displayGeometry\.reach/);
   assert.match(dualBikeControlsSource, /import \{ DotsThree, Info, Plus, Stack as Layers \} from "@phosphor-icons\/react"/);
   assert.match(dualBikeControlsSource, /aria-label="叠层对比"/);
   assert.match(dualBikeControlsSource, /<Layers className="compare-card__icon"/);
@@ -1137,17 +1147,22 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
   for (const [key, value] of Object.entries({
     stack: 585,
     reach: 384,
-    seatTubeAngle: 73.5,
+    headTubeLength: 160,
     headTubeAngle: 72.5,
+    seatTubeAngle: 73.5,
+    chainstay: 420,
+    bbDrop: 80,
   })) {
     draft = updateGeometryImportDraftField(draft, "54", key, value);
   }
   assert.equal(validateGeometryImportDraft(draft).isValid, true);
   assert.deepEqual(getGeometryDraftSourceCounts(draft.sizes[54], { directSource: "manual" }), {
     official: 0,
-    manual: 4,
+    ai: 0,
+    manual: 7,
     derived: 0,
-    estimated: 7,
+    template: 2,
+    estimated: 2,
   });
 
   const copied = copyGeometryImportDraftSize(draft, "56");
@@ -1168,13 +1183,17 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
   assert.equal(manualBike.importSource.entryMode, "manual");
   assert.equal(manualBike.importSource.geometryValueSource, "manual");
   assert.equal(manualBike.geometrySources.stack, "manual");
-  assert.equal(manualBike.geometrySources.wheelbase, "estimated");
-  assert.equal(manualBike.geometryCompleteness, "approximate");
+  assert.equal(manualBike.officialGeometry.wheelbase, null);
+  assert.equal(manualBike.renderSources.wheelbase, "template");
+  assert.equal(manualBike.geometryCompleteness.renderable, true);
+  assert.equal(manualBike.renderGeometryFidelity, "approximate");
   assert.deepEqual(manualBike.sizeData.geometrySourceCounts, {
     official: 0,
-    manual: 4,
+    ai: 0,
+    manual: 7,
     derived: 0,
-    estimated: 7,
+    template: 2,
+    estimated: 2,
   });
 
   const aeroBike = createBikeFromGeometryImport(originalBike, { ...draft, category: "aero" });
@@ -1183,8 +1202,8 @@ test("manual Geometry entry bypasses image parsing and shares the import draft p
   assert.equal(bikeToGeometryImportDraft(aeroBike).category, "aero");
 
   assert.match(geometryImportFlowSource, /<h3>基础信息<\/h3>[\s\S]*不会调用图片识别/);
-  assert.match(geometryImportFlowSource, /<h3>核心几何<\/h3>[\s\S]*showRequired/);
-  assert.match(geometryImportFlowSource, /<h3>补充几何<\/h3>[\s\S]*部分参数将使用模板估算/);
+  assert.match(geometryImportFlowSource, /<h3>生成车架所需<\/h3>[\s\S]*showRequired/);
+  assert.match(geometryImportFlowSource, /补充几何 · \{completeness\.precision\.available\}\/\{completeness\.precision\.total\}[\s\S]*缺失不会影响生成/);
   assert.match(geometryImportFlowSource, /复制当前尺码参数/);
   assert.match(geometryImportFlowSource, /BIKE_CATEGORIES\.map/);
   assert.match(geometryImportFlowSource, /创建后作为车型固定属性，可在修改几何参数中调整/);
@@ -1257,9 +1276,12 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   const sizeData = importGeometryToSizeData("54", missingForkOffset.sizes[54]);
   assert.equal(sizeData.stackMm, 582);
   assert.equal(sizeData.reachMm, 374);
-  assert.notEqual(sizeData.forkOffsetMm, null);
-  assert.equal(sizeData.geometrySources.forkOffset, "estimated");
-  assert.equal(sizeData.geometryCompleteness, "approximate");
+  assert.equal(sizeData.forkOffsetMm, null);
+  assert.equal(sizeData.officialGeometry.forkOffset, null);
+  assert.equal(sizeData.renderGeometry.forkOffset, null);
+  assert.equal(sizeData.renderSources.forkOffset, null);
+  assert.equal(sizeData.geometryCompleteness.renderable, true);
+  assert.equal(sizeData.renderGeometryFidelity, "approximate");
   assert.equal(sizeData.trailMm, null);
   assert.equal(sizeData.standoverMm, null);
 
@@ -1276,14 +1298,16 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.deepEqual(importedBike.fitSetup, originalBike.fitSetup);
   assert.deepEqual(importedBike.componentSetup, originalBike.componentSetup);
   assert.strictEqual(updateBikeSize(importedBike, "49"), importedBike);
-  assert.deepEqual(CORE_GEOMETRY_FIELD_KEYS, ["stack", "reach", "seatTubeAngle", "headTubeAngle"]);
-  assert.deepEqual(STRUCTURAL_GEOMETRY_FIELD_KEYS, ["effectiveTopTube", "seatTubeLength", "headTubeLength", "chainstay", "wheelbase", "bbDrop", "forkOffset"]);
+  assert.deepEqual(CORE_GEOMETRY_FIELD_KEYS, ["stack", "reach", "headTubeLength", "headTubeAngle", "seatTubeAngle", "chainstay", "bbDrop"]);
+  assert.deepEqual(STRUCTURAL_GEOMETRY_FIELD_KEYS, ["effectiveTopTube", "seatTubeLength", "wheelbase", "forkOffset"]);
   const missingPreviewFields = updateGeometryImportDraftField(missingForkOffset, "54", "wheelbase", "");
   assert.equal(isGeometryImportPreviewSafe(missingPreviewFields.sizes[54]), true);
   assert.deepEqual(getGeometryImportPreviewIssues(missingPreviewFields.sizes[54]), []);
   const derivedWheelbase = resolveGeometryImportPreview(updateGeometryImportDraftField(identified, "54", "wheelbase", "").sizes[54]);
-  assert.equal(derivedWheelbase.geometrySources.wheelbase, "derived");
-  assert.equal(derivedWheelbase.geometryCompleteness, "derived");
+  assert.equal(derivedWheelbase.officialGeometry.wheelbase, null);
+  assert.equal(derivedWheelbase.renderSources.wheelbase, "template");
+  assert.equal(derivedWheelbase.geometryCompleteness.renderable, true);
+  assert.equal(derivedWheelbase.renderGeometryFidelity, "approximate");
   const missingCore = updateGeometryImportDraftField(identified, "54", "stack", "");
   assert.equal(isGeometryImportPreviewSafe(missingCore.sizes[54]), false);
   assert.equal(validateGeometryImportDraft(missingCore).firstErrorKey, "sizes.54.stack");
@@ -1351,9 +1375,210 @@ test("geometry import auto-analyzes one editable multi-size draft through the ex
   assert.match(geometryImageAnalyzerSource, /productionGeometryParserClient/);
   assert.match(geometryImageAnalyzerSource, /parserClient\.parse\(imageFile/);
   assert.doesNotMatch(geometryImageAnalyzerSource, /createMockGeometryImportDraft|mockGeometryImport/);
-  assert.match(geometryImportFlowSource, /AI 已提取 \$\{detectedSizeCount\} 个尺码，请核对数据后生成车架/);
+  assert.match(geometryImportFlowSource, /AI 已提取生成车架所需的 \$\{draft\.completenessBySize\?\.\[draft\.selectedSize\]\?\.core\.total \?\? 7\} 项核心几何/);
   assert.match(geometryImportFlowSource, /检测到 \$\{detectedSizeCount\} 个尺码，其中 \$\{confirmationCount\} 项数据需要确认/);
   assert.match(geometryImportFlowSource, /parserWarnings\.map/);
+});
+
+test("Geometry Import V2 Core 7 blocks only selected sizes and keeps Precision optional", () => {
+  let coreOnlyDraft = renameGeometryImportDraftSize(createManualGeometryImportDraft(), "54");
+  coreOnlyDraft = {
+    ...coreOnlyDraft,
+    brand: "Core Seven",
+    model: "Precision Optional",
+    category: "endurance",
+  };
+  for (const [key, value] of Object.entries({
+    stack: 575,
+    reach: 374,
+    headTubeLength: 160,
+    headTubeAngle: 71.3,
+    seatTubeAngle: 73.7,
+    chainstay: 420,
+    bbDrop: 80,
+  })) {
+    coreOnlyDraft = updateGeometryImportDraftField(coreOnlyDraft, "54", key, value);
+  }
+
+  const validCoreOnly = validateGeometryImportDraft(coreOnlyDraft);
+  assert.equal(validCoreOnly.isValid, true);
+  assert.deepEqual(validCoreOnly.errors, {});
+  assert.deepEqual(validCoreOnly.completenessBySize[54], {
+    core: { total: 7, available: 7, complete: true },
+    precision: { total: 6, available: 0 },
+    renderable: true,
+  });
+
+  const preview = resolveGeometryImportPreview(coreOnlyDraft.sizes[54], {
+    directSource: "manual",
+    category: "endurance",
+    valueSources: coreOnlyDraft.valueSourcesBySize[54],
+  });
+  assert.equal(preview.isValid, true);
+  assert.equal(preview.officialGeometry.wheelbase, null);
+  assert.equal(preview.renderSources.wheelbase, "template");
+  assert.ok(Number.isFinite(preview.renderGeometry.wheelbase));
+  assert.equal(preview.officialGeometry.seatTubeLength, null);
+  assert.equal(preview.renderSources.seatTubeLength, "template");
+  assert.ok(Number.isFinite(preview.renderGeometry.seatTubeLength));
+  assert.equal(preview.officialGeometry.effectiveTopTube, null);
+  assert.equal(preview.renderGeometry.effectiveTopTube, null);
+  assert.equal(preview.officialGeometry.forkOffset, null);
+  assert.equal(preview.renderGeometry.forkOffset, null);
+
+  const missingHeadTube = updateGeometryImportDraftField(coreOnlyDraft, "54", "headTubeLength", "");
+  const blocked = validateGeometryImportDraft(missingHeadTube);
+  assert.equal(blocked.isValid, false);
+  assert.equal(blocked.firstErrorKey, "sizes.54.headTubeLength");
+  assert.equal(blocked.completenessBySize[54].renderable, false);
+
+  let multiSizeDraft = copyGeometryImportDraftSize(coreOnlyDraft, "56");
+  multiSizeDraft = updateGeometryImportDraftField(multiSizeDraft, "56", "headTubeLength", "");
+  assert.equal(validateGeometryImportDraft(multiSizeDraft).firstErrorKey, "sizes.56.headTubeLength");
+  const selectedOnlyValidSize = toggleGeometryImportSize(multiSizeDraft, "56");
+  assert.equal(validateGeometryImportDraft(selectedOnlyValidSize).isValid, true);
+  assert.deepEqual(Object.keys(validateGeometryImportDraft(selectedOnlyValidSize).completenessBySize), ["54"]);
+});
+
+test("Geometry Import V2 separates official source data from render fallbacks", () => {
+  const presetSize = createStructuredGeometrySizeData(getTrekDomaneSize("54"), {
+    category: "endurance",
+    valueSource: "official",
+  });
+  assert.deepEqual(presetSize.renderGeometry, presetSize.officialGeometry);
+  assert.ok(Object.values(presetSize.valueSources).every((source) => source === "official"));
+  assert.ok(Object.values(presetSize.renderSources).every((source) => source === "official"));
+
+  const officialGeometry = {
+    ...presetSize.officialGeometry,
+    wheelbase: null,
+    seatTubeLength: null,
+    forkOffset: null,
+  };
+  const valueSources = Object.fromEntries(Object.entries(officialGeometry).map(([key, value]) => [
+    key,
+    value == null ? null : "ai",
+  ]));
+  const extendedGeometry = { frontCenter: 610, standover: 786 };
+  const resolved = resolveRenderGeometry({
+    officialGeometry,
+    valueSources,
+    category: "endurance",
+    extendedGeometry,
+    fallbackValueSource: "ai",
+  });
+  assert.equal(resolved.officialGeometry.wheelbase, null);
+  assert.equal(resolved.renderSources.wheelbase, "derived");
+  assert.ok(Number.isFinite(resolved.renderGeometry.wheelbase));
+  assert.ok(Math.abs(
+    resolved.renderGeometry.wheelbase
+    - (610 + Math.sqrt(presetSize.renderGeometry.chainstay ** 2 - presetSize.renderGeometry.bbDrop ** 2))
+  ) < 1e-9);
+  assert.equal(resolved.officialGeometry.seatTubeLength, null);
+  assert.equal(resolved.renderSources.seatTubeLength, "derived");
+  assert.ok(Number.isFinite(resolved.renderGeometry.seatTubeLength));
+  assert.equal(resolved.officialGeometry.forkOffset, null);
+  assert.equal(resolved.renderGeometry.forkOffset, null);
+
+  const rawRows = [{ label: "Front Center", unit: "mm", values: [610] }];
+  const sizeData = createStructuredGeometrySizeData({
+    size: "54",
+    wheelSize: "700c",
+    officialGeometry,
+  }, {
+    category: "endurance",
+    valueSource: "ai",
+    valueSources,
+    extendedGeometry,
+    rawRows,
+  });
+  assert.equal(sizeData.wheelbaseMm, null);
+  assert.equal(sizeData.seatTubeLengthMm, null);
+  assert.equal(sizeData.forkOffsetMm, null);
+  assert.equal(sizeData.renderSources.wheelbase, "derived");
+  assert.equal(sizeData.renderSources.seatTubeLength, "derived");
+  assert.deepEqual(sizeData.extendedGeometry, extendedGeometry);
+  assert.deepEqual(sizeData.rawRows, rawRows);
+  const renderModel = buildBikeGeometry(toBikeGeometry(sizeData), toGeometryFit(createDefaultBikeSetup().fitSetup));
+  assert.ok(Number.isFinite(renderModel.frame.frontAxle.x));
+  assert.ok(Number.isFinite(renderModel.frame.seatTop.x));
+
+  const mockDraft = createMockGeometryImportDraft();
+  const importDraft = {
+    ...mockDraft,
+    entryMode: "ai",
+    geometryValueSource: "ai",
+    brand: "Quick",
+    model: "Null Source",
+    category: "endurance",
+    sizes: { 54: { ...officialGeometry } },
+    candidateSizes: { 54: { ...officialGeometry } },
+    valueSourcesBySize: { 54: { ...valueSources } },
+    candidateValueSources: { 54: { ...valueSources } },
+    selectedImportSizes: ["54"],
+    selectedSize: "54",
+    detectedSizes: ["54"],
+    extendedGeometryBySize: { 54: { ...extendedGeometry } },
+    rawRows,
+  };
+  const importedBike = createBikeFromGeometryImport(
+    createComparisonBike("source-boundary", createDefaultBikeSetup()),
+    importDraft,
+  );
+  assert.equal(importedBike.valueSources.stack, "ai");
+  assert.equal(importedBike.officialGeometry.wheelbase, null);
+  assert.ok(Number.isFinite(importedBike.renderGeometry.wheelbase));
+  const reopenedDraft = bikeToGeometryImportDraft(importedBike);
+  assert.equal(reopenedDraft.sizes[54].wheelbase, null);
+  assert.equal(reopenedDraft.sizes[54].seatTubeLength, null);
+  assert.equal(reopenedDraft.sizes[54].forkOffset, null);
+  assert.deepEqual(reopenedDraft.rawRows, rawRows);
+  assert.deepEqual(reopenedDraft.extendedGeometryBySize[54], extendedGeometry);
+});
+
+test("Geometry Import V2 Phase 3 keeps display truth separate from render fallbacks", () => {
+  assert.deepEqual(PRECISION_GEOMETRY_IMPORT_FIELDS.map(({ key }) => key), [
+    "wheelbase",
+    "effectiveTopTube",
+    "seatTubeLength",
+    "forkOffset",
+    "frontCenter",
+    "forkLength",
+  ]);
+
+  let draft = renameGeometryImportDraftSize(createManualGeometryImportDraft(), "54");
+  draft = updateGeometryImportDraftField(draft, "54", "frontCenter", 610);
+  draft = updateGeometryImportDraftField(draft, "54", "forkLength", 380);
+  assert.equal(Object.hasOwn(draft.sizes[54], "frontCenter"), false);
+  assert.equal(Object.hasOwn(draft.sizes[54], "forkLength"), false);
+  assert.equal(draft.extendedGeometryBySize[54].frontCenter, 610);
+  assert.equal(draft.extendedGeometryBySize[54].forkLength, 380);
+  assert.equal(getGeometryImportDraftFieldValue(draft, "54", "frontCenter"), 610);
+  assert.equal(draft.completenessBySize[54].precision.available, 2);
+
+  assert.match(geometryImportFlowSource, /<h3>生成车架所需<\/h3>/);
+  assert.match(geometryImportFlowSource, /核心几何完整，可以生成车架/);
+  assert.match(geometryImportFlowSource, /缺少 \$\{missingCoreCount\} 项生成车架所需参数/);
+  assert.match(geometryImportFlowSource, /<details>[\s\S]*补充几何 · \{completeness\.precision\.available\}\/\{completeness\.precision\.total\}/);
+  assert.match(geometryImportFlowSource, /placeholder="未提供"/);
+  assert.doesNotMatch(geometryImportFlowSource, /placeholder="未识别"|>未识别</);
+  assert.match(geometryImportFlowSource, /parserRangeNotice[\s\S]*severity === "warning"/);
+
+  assert.match(framePanelSource, /const officialGeometry = bike\.officialGeometry \?\? sizeData\?\.officialGeometry \?\? \{\}/);
+  assert.match(framePanelSource, /const value = officialGeometry\[key\]/);
+  assert.doesNotMatch(framePanelSource, /sizeData\.(?:stackMm|reachMm|wheelbaseMm|headTubeLengthMm|seatTubeLengthMm|effectiveTopTubeMm|forkOffsetMm)/);
+  assert.match(framePanelSource, /displayGeometryValue = \(value\) => \(value == null \|\| value === "" \? "未提供" : value\)/);
+
+  assert.match(fullscreenGeometrySummarySource, /bike\.officialGeometry \?\? bike\.sizeData\?\.officialGeometry \?\? \{\}/);
+  assert.match(fullscreenGeometrySummarySource, /source === "extended" \? extendedGeometry\[key\] : officialGeometry\[key\]/);
+  assert.doesNotMatch(fullscreenGeometrySummarySource, /bike\.sizeData\?\.\[key\]/);
+  assert.match(fullscreenGeometrySummarySource, /if \(value == null \|\| value === ""\) return "—"/);
+
+  assert.match(comparisonDockSource, /getOfficialGeometry\(reference\)/);
+  assert.match(comparisonDockSource, /reference=\{referenceOfficialGeometry\.wheelbase\} candidate=\{candidateOfficialGeometry\.wheelbase\}/);
+  assert.doesNotMatch(comparisonDockSource, /reference\.geometry\.(?:stack|reach|wheelbase|headTube)/);
+  assert.match(bikeVisualizerSource, /wheelbaseRenderSource === "derived" \|\| wheelbaseRenderSource === "template"/);
+  assert.match(bikeVisualizerSource, /value=\{`\$\{wheelbaseIsEstimated \? "≈" : ""\}\$\{data\.geometry\.wheelbase\} mm`\}/);
 });
 
 test("STR profiles are derived per bike and keep classification boundaries exact", () => {
@@ -1371,7 +1596,7 @@ test("STR profiles are derived per bike and keep classification boundaries exact
   assert.equal(getSTRProfile(bikeA.geometry.stack, bikeA.geometry.reach).label, "舒适耐力几何");
   assert.equal(getSTRProfile(bikeB.geometry.stack, bikeB.geometry.reach).label, "综合型几何");
 
-  assert.match(dualBikeControlsSource, /getSTRProfile\(bike\.geometry\.stack, bike\.geometry\.reach\)/);
+  assert.match(dualBikeControlsSource, /getSTRProfile\(displayGeometry\.stack, displayGeometry\.reach\)/);
   assert.match(dualBikeControlsSource, /strProfile\.value\.toFixed\(2\)/);
   assert.match(dualBikeControlsSource, /className="str-info__trigger"[\s\S]*aria-describedby/);
   assert.match(dualBikeControlsSource, /className="str-tooltip" role="tooltip"/);

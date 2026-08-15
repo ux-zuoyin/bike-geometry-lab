@@ -1,19 +1,19 @@
 const SUMMARY_METRICS = Object.freeze([
-  { key: "stackMm", label: "Stack", unit: "mm" },
-  { key: "reachMm", label: "Reach", unit: "mm" },
-  { key: "headTubeLengthMm", label: "头管长度", unit: "mm" },
-  { key: "wheelbaseMm", label: "轴距", unit: "mm" },
+  { key: "stack", label: "Stack", unit: "mm" },
+  { key: "reach", label: "Reach", unit: "mm" },
+  { key: "headTubeLength", label: "头管长度", unit: "mm" },
+  { key: "wheelbase", label: "轴距", unit: "mm" },
 ]);
 
 const DETAIL_METRICS = Object.freeze([
-  { key: "seatTubeLengthMm", label: "座管长度", unit: "mm" },
-  { key: "seatTubeAngleDeg", label: "座管角", unit: "°" },
-  { key: "headTubeAngleDeg", label: "头管角", unit: "°" },
-  { key: "effectiveTopTubeMm", label: "有效上管", unit: "mm" },
-  { key: "bbDropMm", label: "五通下沉", unit: "mm" },
-  { key: "chainstayMm", label: "后下叉长度", unit: "mm" },
-  { key: "forkOffsetMm", label: "前叉偏移", unit: "mm" },
-  { key: "trailMm", label: "拖曳距", unit: "mm" },
+  { key: "seatTubeLength", label: "座管长度", unit: "mm" },
+  { key: "seatTubeAngle", label: "座管角", unit: "°" },
+  { key: "headTubeAngle", label: "头管角", unit: "°" },
+  { key: "effectiveTopTube", label: "有效上管", unit: "mm" },
+  { key: "bbDrop", label: "五通下沉", unit: "mm" },
+  { key: "chainstay", label: "后下叉长度", unit: "mm" },
+  { key: "forkOffset", label: "前叉偏移", unit: "mm" },
+  { key: "trail", source: "extended", label: "拖曳距", unit: "mm" },
 ]);
 
 function displayValue(value) {
@@ -28,11 +28,13 @@ function GeometryDataSection({ title, metrics, displayedBikes, activeBikeIndex }
     <section className="fullscreen-geometry-summary__section">
       <h3>{title}</h3>
       <dl className="fullscreen-geometry-summary__metric-list">
-        {metrics.map(({ key, label, unit }) => (
+        {metrics.map(({ key, source = "official", label, unit }) => (
           <div className="fullscreen-geometry-summary__metric-row" key={key}>
             <dt>{label}</dt>
             {displayedBikes.map(({ bike, bikeIndex }) => {
-              const display = displayValue(bike.sizeData?.[key]);
+              const officialGeometry = bike.officialGeometry ?? bike.sizeData?.officialGeometry ?? {};
+              const extendedGeometry = bike.extendedGeometry ?? bike.sizeData?.extendedGeometry ?? {};
+              const display = displayValue(source === "extended" ? extendedGeometry[key] : officialGeometry[key]);
               const isMissing = display === "—";
               return (
                 <dd

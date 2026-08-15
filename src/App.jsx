@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { updateWheelSelection, updateWheelSelectionLink } from "./config/bikeComponents.js";
 import { persistBikeSetup, readPersistedBikeSetup } from "./config/setupPersistence.js";
 import { createBikeFromGeometryImport, createComparisonBike, createPresetExperiencePack, getPersistableBikeSetup, instantiatePresetExperienceBike, updateBikeSeatStayStyle, updateBikeSize } from "./state/dualBikeState.js";
-import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_IMPORT_FIELDS, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
+import { addGeometryImportDraftSize, bikeToGeometryImportDraft, copyGeometryImportDraftSize, createManualGeometryImportDraft, GEOMETRY_REVIEW_FIELDS, getGeometryImportDraftFieldValue, getSelectedImportSizes, getGeometryImportFieldError, getGeometryImportPreviewIssues, isBlockingGeometryParserWarning, isGeometryImportPreviewSafe, isSupportedGeometryImage, renameGeometryImportDraftSize, scopeGeometryImportWarnings, toggleGeometryImportSize, updateGeometryImportDraftField, validateGeometryImportDraft } from "./state/geometryImportState.js";
 import { addWorkspaceBike, deleteWorkspaceBike, MAX_BIKES, replaceWorkspaceBike } from "./state/workspaceBikes.js";
 import { DeveloperAboutModal, LandingPage } from "./components/landing/LandingPage.jsx";
 import brandLogo from "./assets/brand/logo_bai.png";
@@ -252,29 +252,38 @@ export function App() {
           ...(updatedDraft.candidateSizes ?? {}),
           [size]: { ...updatedDraft.sizes[size] },
         },
+        candidateValueSources: {
+          ...(updatedDraft.candidateValueSources ?? {}),
+          [size]: { ...(updatedDraft.valueSourcesBySize?.[size] ?? {}) },
+        },
       };
-      const field = GEOMETRY_IMPORT_FIELDS.find((candidate) => candidate.key === key);
+      const field = GEOMETRY_REVIEW_FIELDS.find((candidate) => candidate.key === key);
       const fieldError = getGeometryImportFieldError(field, value === "" ? null : Number(value));
       if (fieldError || !Array.isArray(current.parserWarnings)) return next;
-      const fieldIsComplete = getSelectedImportSizes(next).every((selectedSize) => next.sizes[selectedSize]?.[key] != null);
+      const fieldIsComplete = getSelectedImportSizes(next).every((selectedSize) => (
+        getGeometryImportDraftFieldValue(next, selectedSize, key) != null
+      ));
       const allParserWarnings = (current.allParserWarnings ?? current.parserWarnings ?? []).filter((warning) => {
         if (warning.field !== key) return true;
         if (warning.size === size && ["CELL_UNRECOGNIZED", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)) return false;
         if (fieldIsComplete && ["COLUMN_COUNT_MISMATCH", "REPORTED_COLUMN_COUNT_MISMATCH"].includes(warning.code)) return false;
         return true;
       });
-      const parserWarnings = scopeGeometryImportWarnings(allParserWarnings, getSelectedImportSizes(next));
+      const scopedParserFeedback = scopeGeometryImportWarnings(allParserWarnings, getSelectedImportSizes(next));
+      const parserWarnings = scopedParserFeedback.filter(isBlockingGeometryParserWarning);
+      const parserNotices = scopedParserFeedback.filter((warning) => !isBlockingGeometryParserWarning(warning));
       return {
         ...next,
         allParserWarnings,
         parserWarnings,
-        parserConfirmationCount: parserWarnings.filter((warning) => ["CELL_UNRECOGNIZED", "SIZE_COLUMN_MISSING", "GEOMETRY_VALUE_OUT_OF_RANGE"].includes(warning.code)).length,
+        parserNotices,
+        parserConfirmationCount: parserWarnings.length,
       };
     });
     setGeometryImportErrors((current) => {
       const errorKey = `sizes.${size}.${key}`;
       if (!current[errorKey]) return current;
-      const field = GEOMETRY_IMPORT_FIELDS.find((candidate) => candidate.key === key);
+      const field = GEOMETRY_REVIEW_FIELDS.find((candidate) => candidate.key === key);
       const error = getGeometryImportFieldError(field, value === "" ? null : Number(value));
       if (error) return { ...current, [errorKey]: error };
       const next = { ...current };

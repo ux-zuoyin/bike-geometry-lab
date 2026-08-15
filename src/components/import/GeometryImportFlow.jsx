@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle, ImageSquare, Info, Plus, SpinnerGap, UploadSimple, WarningCircle } from "@phosphor-icons/react";
-import { GEOMETRY_IMPORT_FIELDS, getGeometryDraftSourceCounts, getSelectedImportSizes, MANUAL_GEOMETRY_SIZE_PLACEHOLDER } from "../../state/geometryImportState.js";
+import { CORE_GEOMETRY_FIELD_KEYS, GEOMETRY_IMPORT_FIELDS, PRECISION_GEOMETRY_IMPORT_FIELDS, getGeometryImportDraftFieldValue, getSelectedImportSizes, MANUAL_GEOMETRY_SIZE_PLACEHOLDER } from "../../state/geometryImportState.js";
 import { BIKE_CATEGORIES, getBikeCategoryLabel } from "../../config/bikeArchetypes.js";
 import { sortBikeSizes } from "../../lib/geometry/sizeSorting.js";
 
@@ -89,27 +89,71 @@ function AnalyzingState({ image, onSelectImage, onCancel }) {
   );
 }
 
-function GeometryFieldRows({ fields, draft, errors, parserWarnings, onGeometryFieldChange, showRequired = false }) {
-  const selectedGeometry = draft.sizes[draft.selectedSize] ?? {};
+function GeometryFieldRows({ fields, draft, errors, parserWarnings = [], parserNotices = [], onGeometryFieldChange, showRequired = false }) {
   return (
     <div className="geometry-import__field-list">
       {fields.map((field) => {
         const errorKey = `sizes.${draft.selectedSize}.${field.key}`;
-        const parserRangeWarning = parserWarnings.find((warning) => (
+        const parserRangeError = parserWarnings.find((warning) => (
           warning.code === "GEOMETRY_VALUE_OUT_OF_RANGE"
           && warning.size === draft.selectedSize
           && warning.field === field.key
         ));
-        const error = errors[errorKey] || (parserRangeWarning
+        const parserRangeNotice = parserNotices.find((warning) => (
+          warning.code === "GEOMETRY_VALUE_OUT_OF_RANGE"
+          && warning.severity === "warning"
+          && warning.size === draft.selectedSize
+          && warning.field === field.key
+        ));
+        const error = errors[errorKey] || (parserRangeError
           ? "识别结果可能发生串列，请核对原图。"
           : null);
-        const value = selectedGeometry[field.key];
+        const warning = !error && parserRangeNotice
+          ? "数值可能异常，但不会阻止生成；请核对原图。"
+          : null;
+        const value = getGeometryImportDraftFieldValue(draft, draft.selectedSize, field.key);
         const errorId = `geometry-import-${draft.selectedSize}-${field.key}-error`;
+        const warningId = `geometry-import-${draft.selectedSize}-${field.key}-warning`;
         const inputId = `geometry-import-${draft.selectedSize}-${field.key}`;
         const tooltipId = `${inputId}-tooltip`;
-        return <div key={field.key} className={`geometry-import__field-row${error ? " has-error" : ""}`}><span className="geometry-import__field-name"><label htmlFor={inputId}><strong>{field.label}{showRequired && field.required && <b aria-hidden="true"> *</b>}</strong><span className="geometry-import__field-translation">{field.reviewLabel}</span>{!field.required && value == null && <small>未识别</small>}</label>{field.tooltip && <span className="geometry-import__field-tooltip"><button type="button" aria-label={`查看 ${field.label} 术语说明`} aria-describedby={tooltipId}><Info size={14} weight="regular" aria-hidden="true" /></button><span id={tooltipId} role="tooltip">{field.tooltip}</span></span>}</span><span className="geometry-import__number-input"><input id={inputId} data-validation-key={errorKey} type="number" step={field.unit === "°" ? "0.1" : "1"} value={value ?? ""} placeholder="未识别" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => onGeometryFieldChange(field.key, event.target.value)} /><small>{field.unit}</small></span>{error && <em id={errorId} role="alert">{error}</em>}</div>;
+        return <div key={field.key} className={`geometry-import__field-row${error ? " has-error" : ""}${warning ? " has-warning" : ""}`}><span className="geometry-import__field-name"><label htmlFor={inputId}><strong>{field.label}{showRequired && field.required && <b aria-hidden="true"> *</b>}</strong><span className="geometry-import__field-translation">{field.reviewLabel}</span>{!field.required && value == null && <small className="geometry-import__missing">未提供</small>}</label>{field.tooltip && <span className="geometry-import__field-tooltip"><button type="button" aria-label={`查看 ${field.label} 术语说明`} aria-describedby={tooltipId}><Info size={14} weight="regular" aria-hidden="true" /></button><span id={tooltipId} role="tooltip">{field.tooltip}</span></span>}</span><span className="geometry-import__number-input"><input id={inputId} data-validation-key={errorKey} type="number" step={field.unit === "°" ? "0.1" : "1"} value={value ?? ""} placeholder="未提供" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : (warning ? warningId : undefined)} onChange={(event) => onGeometryFieldChange(field.key, event.target.value)} /><small>{field.unit}</small></span>{error && <em id={errorId} role="alert">{error}</em>}{warning && <em className="geometry-import__field-warning" id={warningId}>{warning}</em>}</div>;
       })}
     </div>
+  );
+}
+
+function GeometryReviewSections({ draft, errors, parserWarnings, parserNotices, onGeometryFieldChange, sizeLabel }) {
+  const coreFields = CORE_GEOMETRY_FIELD_KEYS.map((key) => (
+    GEOMETRY_IMPORT_FIELDS.find((field) => field.key === key)
+  ));
+  const completeness = draft.geometryCompleteness
+    ?? draft.completenessBySize?.[draft.selectedSize]
+    ?? { core: { total: 7, available: 0, complete: false }, precision: { total: 6, available: 0 }, renderable: false };
+  const missingCoreCount = Math.max(0, completeness.core.total - completeness.core.available);
+
+  return (
+    <>
+      <section className="geometry-import__block geometry-import__core-section">
+        <div className="geometry-import__review-title">
+          <div><h3>生成车架所需</h3><span>7 项核心几何决定当前车架的基本结构。</span></div>
+          {sizeLabel && <span>{sizeLabel}</span>}
+        </div>
+        <p className={`geometry-import__core-status${completeness.core.complete ? " is-complete" : " is-incomplete"}`} role="status">
+          {completeness.core.complete
+            ? <><CheckCircle size={16} weight="fill" aria-hidden="true" />核心几何完整，可以生成车架</>
+            : `缺少 ${missingCoreCount} 项生成车架所需参数`}
+        </p>
+        <GeometryFieldRows fields={coreFields} draft={draft} errors={errors} parserWarnings={parserWarnings} onGeometryFieldChange={onGeometryFieldChange} showRequired />
+      </section>
+      <section className="geometry-import__block geometry-import__precision-section">
+        <details>
+          <summary>
+            <span><strong>补充几何 · {completeness.precision.available}/{completeness.precision.total}</strong><small>用于提高车架与轮轴位置精度，缺失不会影响生成。</small></span>
+          </summary>
+          <GeometryFieldRows fields={PRECISION_GEOMETRY_IMPORT_FIELDS} draft={draft} errors={errors} parserNotices={parserNotices} onGeometryFieldChange={onGeometryFieldChange} />
+        </details>
+      </section>
+    </>
   );
 }
 
@@ -126,15 +170,12 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
     ...Object.keys(draft.candidateSizes ?? draft.sizes),
   ])];
   const candidateSizes = sortBikeSizes(candidateSizeSource, { sourceOrder: candidateSizeSource });
-  const selectedGeometry = draft.sizes[draft.selectedSize] ?? {};
   const parserWarnings = Array.isArray(draft.parserWarnings) ? draft.parserWarnings : [];
+  const parserNotices = Array.isArray(draft.parserNotices) ? draft.parserNotices : [];
   const detectedSizeCount = draft.detectedSizeCount ?? sizes.length;
   const confirmationCount = draft.parserConfirmationCount || parserWarnings.length;
   const isManual = mode === "manual" || draft.entryMode === "manual";
   const manualSizeName = draft.selectedSize === MANUAL_GEOMETRY_SIZE_PLACEHOLDER ? "" : draft.selectedSize;
-  const manualSourceCounts = isManual
-    ? getGeometryDraftSourceCounts(selectedGeometry, { directSource: "manual" })
-    : null;
   useEffect(() => {
     if (!errorNavigation?.key) return;
     const target = formRef.current?.querySelector(`[data-validation-key="${errorNavigation.key}"]`);
@@ -190,19 +231,6 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
     }
   };
   if (isManual) {
-    const coreFields = GEOMETRY_IMPORT_FIELDS.filter(({ required }) => required);
-    const supplementalFieldOrder = [
-      "seatTubeLength",
-      "headTubeLength",
-      "effectiveTopTube",
-      "chainstay",
-      "wheelbase",
-      "bbDrop",
-      "forkOffset",
-    ];
-    const supplementalFields = supplementalFieldOrder.map((key) => (
-      GEOMETRY_IMPORT_FIELDS.find((field) => field.key === key)
-    ));
     return (
       <form ref={formRef} className="geometry-import geometry-import--review geometry-import--manual" noValidate onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <section className="geometry-import__block">
@@ -220,15 +248,14 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
             <button type="button" onClick={copySize}>复制当前尺码参数</button>
           </div>
         </section>
-        <section className="geometry-import__block">
-          <div className="geometry-import__review-title"><div><h3>核心几何</h3><span>完成以下参数后即可生成车架</span></div><span>{manualSizeName || "待填写尺码"}</span></div>
-          <GeometryFieldRows fields={coreFields} draft={draft} errors={errors} parserWarnings={[]} onGeometryFieldChange={onGeometryFieldChange} showRequired />
-        </section>
-        <section className="geometry-import__block">
-          <div className="geometry-import__review-title"><div><h3>补充几何</h3><span>填写更多官网参数可以提高车架预览准确度，没有的数据可以留空。</span></div></div>
-          <GeometryFieldRows fields={supplementalFields} draft={draft} errors={errors} parserWarnings={[]} onGeometryFieldChange={onGeometryFieldChange} />
-          <p className={`geometry-import__completeness${manualSourceCounts.estimated ? " is-approximate" : ""}`}>{manualSourceCounts.manual} 项手动数据{manualSourceCounts.derived ? ` · ${manualSourceCounts.derived} 项几何推导` : ""}{manualSourceCounts.estimated ? ` · ${manualSourceCounts.estimated} 项模板估算。部分参数将使用模板估算` : ""}</p>
-        </section>
+        <GeometryReviewSections
+          draft={draft}
+          errors={errors}
+          parserWarnings={[]}
+          parserNotices={[]}
+          onGeometryFieldChange={onGeometryFieldChange}
+          sizeLabel={manualSizeName || "待填写尺码"}
+        />
         <div className="geometry-import__review-actions">
           {submitFeedback && <p className="geometry-import__submit-feedback" role="status" aria-live="polite">{submitFeedback.message}</p>}
           <div className="geometry-import__review-buttons">
@@ -246,7 +273,7 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
         <div className={`geometry-import__parser-status${parserWarnings.length ? " needs-confirmation" : " is-complete"}`} role="status">
           <strong>{parserWarnings.length
             ? `检测到 ${detectedSizeCount} 个尺码，其中 ${confirmationCount} 项数据需要确认`
-            : `AI 已提取 ${detectedSizeCount} 个尺码，请核对数据后生成车架`}</strong>
+            : `AI 已提取生成车架所需的 ${draft.completenessBySize?.[draft.selectedSize]?.core.total ?? 7} 项核心几何`}</strong>
           {parserWarnings.length > 0 && (
             <ul>
               {parserWarnings.map((warning, index) => <li key={`${warning.code}-${warning.field ?? "all"}-${warning.size ?? "all"}-${index}`}>{warning.message}</li>)}
@@ -270,10 +297,14 @@ function ReviewState({ mode, image, draft, errors, onSelectImage, onDraftMetaCha
         <div className="geometry-import__add-size"><input data-validation-key="sizes" type="text" inputMode="decimal" value={newSize} aria-label="补充尺码" placeholder="输入尺码，例如 58" aria-invalid={Boolean(errors.sizes)} aria-describedby={errors.sizes ? "geometry-import-sizes-error" : undefined} onChange={(event) => setNewSize(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSize(); } }} /><button type="button" onClick={addSize}><Plus size={16} />补充尺码</button></div>
         {errors.sizes && <p id="geometry-import-sizes-error" className="geometry-import__inline-error" role="alert">{errors.sizes}</p>}
       </section>
-      <section className="geometry-import__block">
-        <div className="geometry-import__review-title"><h3>关键几何参数</h3><span>{draft.selectedSize} 码</span></div>
-        <GeometryFieldRows fields={GEOMETRY_IMPORT_FIELDS} draft={draft} errors={errors} parserWarnings={parserWarnings} onGeometryFieldChange={onGeometryFieldChange} />
-      </section>
+      <GeometryReviewSections
+        draft={draft}
+        errors={errors}
+        parserWarnings={parserWarnings}
+        parserNotices={parserNotices}
+        onGeometryFieldChange={onGeometryFieldChange}
+        sizeLabel={`${draft.selectedSize} 码`}
+      />
       <div className="geometry-import__review-actions">
         {submitFeedback && <p className="geometry-import__submit-feedback" role="status" aria-live="polite">{submitFeedback.message}</p>}
         {mode === "edit" && image?.file && <button type="button" className="geometry-import__secondary" onClick={onReanalyze}>重新识别原图</button>}

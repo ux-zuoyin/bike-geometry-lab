@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  CORE_GEOMETRY_FIELD_KEYS as PARSER_CORE_GEOMETRY_FIELD_KEYS,
   GEOMETRY_PARSER_FIELD_KEYS,
   GEOMETRY_PARSER_INPUT_TYPES,
   GEOMETRY_PARSER_PLAUSIBILITY_RANGES,
   GEOMETRY_PARSER_RAW_TABLE_SCHEMA,
   GEOMETRY_PARSER_STRUCTURED_OUTPUT_SCHEMA,
+  PRECISION_GEOMETRY_FIELD_KEYS,
 } from "../src/services/geometryParserSchema.js";
 import {
   GeometryParserValidationError,
@@ -157,6 +159,14 @@ test("explicit centimetre context normalizes mapped lengths once and preserves a
     stack: 524,
   });
   assert.deepEqual(draft.candidateSizes.XS, xs);
+  assert.deepEqual(validated.completenessBySize.XS.core, {
+    total: 7,
+    available: 7,
+    complete: true,
+  });
+  assert.equal(validated.completenessBySize.XS.renderable, true);
+  assert.equal(validated.extendedGeometryBySize.XS.trail, 62);
+  assert.equal(validated.extendedGeometryBySize.XS.standover, 721);
   assert.equal(normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "unknown" }), mapped);
 });
 
@@ -227,10 +237,31 @@ test("mapper gives Specialized-specific labels precedence and preserves non-sche
   assert.deepEqual(mapped.unrecognizedFields.map(({ sourceLabel, reason }) => ({ sourceLabel, reason })), [
     { sourceLabel: "把立堆高", reason: "把立堆高不属于车架 Stack，已禁止映射。" },
     { sourceLabel: "把立前伸量", reason: "把立前伸量不属于车架 Reach，已禁止映射。" },
-    { sourceLabel: "前轴距", reason: "Front Center / 前轴距不属于当前 Geometry Schema，已禁止映射到 Wheelbase。" },
+    { sourceLabel: "前轴距", reason: "Front Center / 前轴距属于 Precision Geometry，已保留且不会映射为 Wheelbase。" },
     { sourceLabel: "拖曳距", reason: "Trail / 拖曳距不属于当前 Geometry Schema。" },
     { sourceLabel: "跨高", reason: "Standover / 跨高不属于当前 Geometry Schema。" },
   ]);
+  assert.equal(mapped.extendedGeometryBySize[52].frontCenter, 590);
+  assert.equal(mapped.extendedGeometryBySize[52].trail, 58);
+  assert.equal(mapped.extendedGeometryBySize[52].standover, 760);
+});
+
+test("ETT semantic priority beats source order, generic Top Tube, and Top Tube Actual", () => {
+  const mapped = mapRawGeometryTableToParserResponse({
+    detectedSizeCount: 1,
+    detectedSizes: ["54"],
+    rawRows: [
+      { label: "Top Tube Actual", unit: "mm", values: [515] },
+      { label: "Top Tube Length", unit: "mm", values: [520] },
+      { label: "Effective Top Tube", unit: "mm", values: [525] },
+      { label: "Horizontal Top Tube", unit: "mm", values: [530] },
+      { label: "Top Tube Horizontal", unit: "mm", values: [535] },
+    ],
+  });
+
+  assert.equal(mapped.sizes[0].geometry.effectiveTopTube, 535);
+  assert.equal(mapped.extendedGeometryBySize[54].topTubeActual, 515);
+  assert.ok(mapped.warnings.some(({ code, field }) => code === "RAW_ROW_DUPLICATE_FIELD" && field === "effectiveTopTube"));
 });
 
 test("QUICK fixture preserves all five official size labels and benchmark columns", () => {
@@ -276,17 +307,21 @@ test("validator flags the real QUICK standover-to-BB-Drop regression without pas
     size: "550",
     value: 812,
     message: "550 尺码的 BB Drop 识别为 812 mm，数值明显异常，请核对。",
+    severity: "error",
   });
   assert.equal(result.confirmationCount, 1);
 
-  assert.equal(isGeometryImportPreviewSafe(size550.geometry), true);
+  assert.equal(isGeometryImportPreviewSafe(size550.geometry), false);
   const preview = resolveGeometryImportPreview(size550.geometry);
-  assert.equal(preview.geometry.bbDrop, 80);
-  assert.equal(preview.geometrySources.bbDrop, "estimated");
+  assert.equal(preview.officialGeometry.bbDrop, 812);
+  assert.equal(preview.completeness.core.available, 6);
+  assert.equal(preview.completeness.renderable, false);
+  assert.equal(preview.geometry, null);
 });
 
-test("validator applies every configured geometry plausibility guardrail", () => {
-  for (const [field, range] of Object.entries(GEOMETRY_PARSER_PLAUSIBILITY_RANGES)) {
+test("validator applies every mapped Geometry plausibility guardrail", () => {
+  for (const field of GEOMETRY_PARSER_FIELD_KEYS) {
+    const range = GEOMETRY_PARSER_PLAUSIBILITY_RANGES[field];
     const raw = createQuickGeometryParserFixture();
     raw.sizes[0].geometry[field] = range.max + 1;
     const result = validateAndNormalizeGeometryParserResponse(raw);
@@ -308,13 +343,32 @@ test("partial QUICK response retains 430 and warns for missing Wheelbase and For
   assert.equal(size430.geometry.forkOffset, null);
   assert.ok(result.warnings.some(({ code, field, size }) => code === "CELL_UNRECOGNIZED" && field === "wheelbase" && size === "430"));
   assert.ok(result.warnings.some(({ code, field, size }) => code === "CELL_UNRECOGNIZED" && field === "forkOffset" && size === "430"));
+  assert.equal(result.warnings.find(({ code, field, size }) => code === "CELL_UNRECOGNIZED" && field === "wheelbase" && size === "430").severity, "info");
+  assert.equal(result.confirmationCount, 0);
 
   const preview = resolveGeometryImportPreview(geometryParserResponseToDraft(result).sizes["430"]);
   assert.equal(preview.isValid, true);
+  assert.equal(preview.officialGeometry.wheelbase, null);
+  assert.equal(preview.officialGeometry.forkOffset, null);
   assert.equal(preview.geometry.wheelbase, 1010);
-  assert.equal(preview.geometrySources.wheelbase, "estimated");
-  assert.equal(preview.geometrySources.forkOffset, "estimated");
-  assert.equal(preview.geometryCompleteness, "approximate");
+  assert.equal(preview.geometrySources.wheelbase, "template");
+  assert.equal(preview.geometry.forkOffset, null);
+  assert.equal(preview.geometrySources.forkOffset, null);
+  assert.equal(preview.geometryCompleteness.renderable, true);
+  assert.equal(preview.renderGeometryFidelity, "approximate");
+  const draft = geometryParserResponseToDraft(result);
+  assert.equal(draft.parserWarnings.length, 0);
+  assert.ok(draft.parserNotices.some(({ field }) => field === "wheelbase"));
+});
+
+test("Core and Precision definitions remain explicit and non-overlapping", () => {
+  assert.deepEqual(PARSER_CORE_GEOMETRY_FIELD_KEYS, [
+    "stack", "reach", "headTubeLength", "headTubeAngle", "seatTubeAngle", "chainstay", "bbDrop",
+  ]);
+  assert.deepEqual(PRECISION_GEOMETRY_FIELD_KEYS, [
+    "wheelbase", "effectiveTopTube", "seatTubeLength", "forkOffset", "frontCenter", "forkLength",
+  ]);
+  assert.deepEqual(PARSER_CORE_GEOMETRY_FIELD_KEYS.filter((key) => PRECISION_GEOMETRY_FIELD_KEYS.includes(key)), []);
 });
 
 test("validator uses detectedSizes as source order without shifting keyed geometry", () => {
@@ -406,6 +460,33 @@ test("analyzer uses an injected parser and maps response into the existing draft
   assert.equal(draft.category, null);
   assert.equal(draft.parserWarnings.length, 0);
   assert.doesNotMatch(analyzerSource, /createMockGeometryImportDraft|mockGeometryImport/);
+});
+
+test("AI draft marks recognized values as ai and retains precision rows as extended geometry", () => {
+  const rawTable = createQuickGeometryParserRawTableFixture();
+  rawTable.rawRows.push({
+    label: "Front Center",
+    unit: "mm",
+    values: [575, 580, 590, 600, 615],
+  });
+  rawTable.rawRows.push({
+    label: "Axle to Crown",
+    unit: "mm",
+    values: [370, 372, 374, 376, 378],
+  });
+  const parsed = validateAndNormalizeGeometryParserResponse(
+    mapRawGeometryTableToParserResponse(rawTable),
+  );
+  const draft = geometryParserResponseToDraft(parsed);
+
+  assert.equal(draft.geometryValueSource, "ai");
+  assert.equal(draft.valueSourcesBySize["430"].stack, "ai");
+  assert.equal(draft.candidateValueSources["430"].wheelbase, "ai");
+  assert.equal(draft.extendedGeometryBySize["430"].frontCenter, 575);
+  assert.equal(draft.extendedGeometryBySize["430"].forkLength, 370);
+  assert.equal(draft.extendedGeometryBySize["430"].standover, 725);
+  assert.deepEqual(draft.completenessBySize["430"].precision, { total: 6, available: 6 });
+  assert.ok(draft.rawRows.some(({ label }) => label === "Front Center"));
 });
 
 test("provider registry explicitly selects qwen or openai and rejects invalid values", () => {
@@ -829,7 +910,7 @@ test("worker ignores model-reported field counts and returns its own recomputati
 
 test("draft adapter preserves official size strings and parser warnings", () => {
   const fixture = validateAndNormalizeGeometryParserResponse(createQuickGeometryParserFixture());
-  fixture.warnings.push({ code: "TEST", message: "550 尺码 Stack 未可靠识别。", field: "stack", size: "550" });
+  fixture.warnings.push({ code: "TEST", message: "550 尺码 Stack 未可靠识别。", field: "stack", size: "550", severity: "error" });
   let draft = geometryParserResponseToDraft(fixture);
   assert.deepEqual(Object.keys(draft.sizes), QUICK_SIZES);
   assert.deepEqual(Object.keys(draft.candidateSizes), QUICK_SIZES);

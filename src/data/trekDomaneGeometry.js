@@ -153,6 +153,25 @@ export const bikeGeometryByModel = {
 // calculation layer. Product data stays in the explicit, unit-bearing schema
 // above and crosses this adapter at one boundary.
 export function toBikeGeometry(geometry) {
+  const renderGeometry = geometry.renderGeometry;
+  if (renderGeometry) {
+    return {
+      wheel: geometry.wheelSize ?? "700c",
+      seatTube: renderGeometry.seatTubeLength,
+      seatAngle: renderGeometry.seatTubeAngle,
+      headTube: renderGeometry.headTubeLength,
+      headAngle: renderGeometry.headTubeAngle,
+      effectiveTopTube: renderGeometry.effectiveTopTube,
+      bbDrop: renderGeometry.bbDrop,
+      chainstay: renderGeometry.chainstay,
+      forkRake: renderGeometry.forkOffset,
+      trail: geometry.extendedGeometry?.trail ?? geometry.trailMm ?? null,
+      wheelbase: renderGeometry.wheelbase,
+      standover: geometry.extendedGeometry?.standover ?? geometry.standoverMm ?? null,
+      reach: renderGeometry.reach,
+      stack: renderGeometry.stack,
+    };
+  }
   return {
     wheel: geometry.wheelSize,
     seatTube: geometry.seatTubeLengthMm,
