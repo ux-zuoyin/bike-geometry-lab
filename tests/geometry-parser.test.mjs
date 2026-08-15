@@ -103,8 +103,8 @@ test("raw-table provider schema requires source rows with aligned values", () =>
     GEOMETRY_PARSER_INPUT_TYPES,
   );
   const rawRowSchema = GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.rawRows.items;
-  assert.deepEqual(rawRowSchema.required, ["label", "unit", "explicitUnit", "values"]);
-  assert.deepEqual(rawRowSchema.properties.explicitUnit.enum, ["mm", "cm", "inch", null]);
+  assert.deepEqual(rawRowSchema.required, ["label", "values"]);
+  assert.equal(rawRowSchema.properties.explicitUnit.enum, undefined);
   assert.deepEqual(rawRowSchema.properties.values.items.type, ["number", "null"]);
   assert.deepEqual(
     GEOMETRY_PARSER_RAW_TABLE_SCHEMA.properties.measurementContext.properties.defaultLengthUnit.enum,
@@ -196,7 +196,7 @@ test("Synapse row-level centimetres override an unknown global unit", () => {
     detectedSizeCount: 1,
     detectedSizes: ["54"],
     rawRows: [
-      { label: "Stack (cm)", unit: "cm", explicitUnit: "cm", values: [57] },
+      { label: "Stack (cm)", unit: "cm", values: [57] },
       { label: "Reach (cm)", unit: "cm", explicitUnit: "cm", values: [38.1] },
       { label: "Head Tube Length (cm)", unit: "cm", explicitUnit: "cm", values: [15] },
       { label: "Head Tube Angle", unit: "°", explicitUnit: null, values: [71.3] },
@@ -292,12 +292,28 @@ test("a hallucinated legacy or explicit row unit without label evidence cannot o
   assert.equal(normalized.sizes[0].geometry.stack, 575);
 });
 
+test("an invalid model explicitUnit is ignored in favor of global cm", () => {
+  const rawTable = {
+    detectedSizeCount: 1,
+    detectedSizes: ["M"],
+    rawRows: [
+      { label: "Stack", unit: "degree", explicitUnit: "INVALID", values: [57] },
+    ],
+  };
+  const mapped = mapRawGeometryTableToParserResponse(rawTable);
+  const normalized = normalizeExplicitGeometryUnits(mapped, { defaultLengthUnit: "cm" });
+
+  assert.equal(mapped.rawRows[0].explicitUnit, null);
+  assert.equal(mapped.fieldUnits.stack.explicitUnit, null);
+  assert.equal(normalized.sizes[0].geometry.stack, 570);
+});
+
 test("unknown length units preserve values without magnitude inference and emit a unit error", () => {
   const rawTable = {
     detectedSizeCount: 1,
     detectedSizes: ["M"],
     rawRows: [
-      { label: "Stack", unit: null, explicitUnit: null, values: [57.5] },
+      { label: "Stack", values: [57.5] },
       { label: "Head Tube Angle", unit: "°", explicitUnit: null, values: [71.2] },
     ],
   };
@@ -956,15 +972,25 @@ test("qwen rejects raw rows whose value count does not match the detected sizes"
   }]);
 });
 
-test("qwen requires an explicit-unit field for every road-bike raw row", async () => {
+test("qwen accepts a road-bike raw row without model explicitUnit", async () => {
   const rawTable = createQuickGeometryParserRawTableFixture();
   delete rawTable.rawRows[0].explicitUnit;
   const response = await requestQwenFixture(rawTable);
   const payload = await response.json();
 
-  assert.equal(response.status, 422);
-  assert.equal(payload.error.code, "RAW_TABLE_ROW_EXPLICIT_UNIT_INVALID");
-  assert.deepEqual(payload.error.details, [{ rowIndex: 0, label: "尺寸/座管长度" }]);
+  assert.equal(response.status, 200);
+  assert.equal(payload.rawRows[0].explicitUnit, null);
+});
+
+test("qwen ignores an invalid model explicitUnit instead of rejecting the parser response", async () => {
+  const rawTable = createQuickGeometryParserRawTableFixture();
+  rawTable.rawRows.find(({ label }) => label === "Stack").explicitUnit = "INVALID";
+  const response = await requestQwenFixture(rawTable);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.rawRows.find(({ label }) => label === "Stack").explicitUnit, null);
+  assert.equal(payload.sizes[0].geometry.stack, QUICK_GEOMETRY[QUICK_SIZES[0]].stack);
 });
 
 test("worker requests raw table extraction and maps source labels deterministically", async () => {
